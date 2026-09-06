@@ -1,0 +1,4004 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>Deck Template â 7 themes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Crimson+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600;1,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500;1,6..72,600&family=Open+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600;1,700&family=Source+Sans+3:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<script src="deck-stage.js"></script>
+
+<style>
+  /*Defaults theme = 'frankfurt'*/
+  deck-stage {
+    --cover-bg: linear-gradient(135deg, #0f172a 0%, #172554 46%, #1d4ed8 100%);
+    --end-bg:   radial-gradient(circle at top, #1e3a8a 0%, #0f172a 72%);
+    --accent: #e2b96f;
+    --text: #f8fafc;
+    --dim: rgba(248, 250, 252, 0.55);
+    --c1: #5b9bd5;
+    --c2: #e07b6a;
+    --c3: #7b68c8;
+    --c4: #f0a050;
+    --panel-text: #0b0d12;
+    /* Per-theme font stack (overridden by JS â Vietnamese-safe) */
+    --font-display: 'Montserrat', system-ui, sans-serif;
+    --font-body: 'Open Sans', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --display-italic: italic;
+    --display-tracking: -0.025em;
+  }
+
+  /* =========================================================
+     SLIDE BASE
+     ========================================================= */
+  .slide {
+    width: 1920px;
+    height: 1080px;
+    color: var(--text);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    overflow: hidden;
+    /* Container queries: child elements can use cqw / cqh units that
+       scale with the slide size. Useful when slide is rendered at
+       smaller sizes (print, thumbnail). */
+    container-type: size;
+    container-name: slide;
+  }
+
+  @keyframes deckSlideIn {
+    from { opacity: 0; transform: translateX(40px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  deck-stage[data-transitions="true"] section.slide[data-deck-active] {
+    animation: deckSlideIn 0.35s ease-out forwards;
+  }
+
+  .slide.cover { background: var(--cover-bg); }
+  .slide.end   { background: var(--end-bg); }
+  .slide.body  { background: var(--cover-bg); }
+
+  /* Subtle grain on every slide */
+  .slide::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 4px 4px;
+    pointer-events: none;
+    mix-blend-mode: overlay;
+  }
+
+  /* Header / footer chrome */
+  .chrome-top, .chrome-bot {
+    position: absolute;
+    left: 80px; right: 80px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+    z-index: 2;
+  }
+  .chrome-top { top: 60px; }
+  .chrome-bot { bottom: 60px; }
+  .chrome-top .dot, .chrome-bot .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    margin-right: 14px;
+    vertical-align: 2px;
+  }
+
+  /* =========================================================
+     01 COVER
+     ========================================================= */
+  .cover .body-wrap {
+    position: absolute;
+    inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    z-index: 1;
+  }
+  .cover .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .cover .eyebrow::before {
+    content: "";
+    width: 88px; height: 2px;
+    background: var(--accent);
+  }
+  .cover h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 220px;
+    line-height: 0.96;
+    letter-spacing: -0.035em;
+    margin: 0;
+    max-width: 1500px;
+  }
+  .cover h1 em {
+    font-style: var(--display-italic, italic);
+    color: var(--accent);
+  }
+  .cover .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .cover .meta-row .by {
+    font-family: var(--font-body);
+    font-size: 26px;
+    line-height: 1.5;
+    color: var(--dim);
+    max-width: 600px;
+  }
+  .cover .meta-row .by b {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .cover .meta-row .date {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: var(--dim);
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  /* =========================================================
+     02 AGENDA
+     ========================================================= */
+  .agenda .body-wrap {
+    position: absolute;
+    inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-columns: 1fr 1.6fr;
+    gap: 100px;
+    align-content: center;
+    z-index: 1;
+  }
+  .agenda .lhs h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 120px;
+    line-height: 0.92;
+    margin: 0 0 32px;
+    letter-spacing: -0.025em;
+  }
+  .agenda .lhs h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .agenda .lhs p {
+    font-family: var(--font-body);
+    font-size: 26px;
+    line-height: 1.55;
+    color: var(--dim);
+    max-width: 460px;
+    margin: 0;
+  }
+  .agenda ol {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    counter-reset: ag;
+  }
+  .agenda ol li {
+    counter-increment: ag;
+    padding: 28px 0;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    display: grid;
+    grid-template-columns: 110px 1fr auto;
+    align-items: baseline;
+    column-gap: 32px;
+  }
+  .agenda ol li:last-child { border-bottom: 1px solid rgba(255,255,255,0.12); }
+  .agenda ol li::before {
+    content: counter(ag, decimal-leading-zero);
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+  }
+  .agenda ol li .ttl {
+    font-family: var(--font-display);
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .agenda ol li .dur {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: var(--dim);
+    letter-spacing: 0.1em;
+  }
+
+  /* =========================================================
+     03 STAT
+     ========================================================= */
+  .stat .body-wrap {
+    position: absolute; inset: 0;
+    padding: 200px 120px 140px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    z-index: 1;
+  }
+  .stat .kicker {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .stat .kicker b { color: var(--accent); font-weight: 500; }
+  .stat .nums {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 80px;
+    align-items: end;
+    padding: 60px 0;
+  }
+  .stat .nums .n {
+    border-top: 2px solid var(--accent);
+    padding-top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .stat .nums .big {
+    font-family: var(--font-display);
+    font-size: 240px;
+    line-height: 0.9;
+    letter-spacing: -0.03em;
+  }
+  .stat .nums .big em {
+    font-style: var(--display-italic, italic);
+    color: var(--accent);
+    font-size: 0.5em;
+    vertical-align: 0.55em;
+  }
+  .stat .nums .lbl {
+    font-size: 26px;
+    line-height: 1.4;
+    color: var(--dim);
+    max-width: 360px;
+  }
+  .stat .note {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: var(--dim);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    padding-top: 24px;
+    max-width: 800px;
+  }
+
+  /* =========================================================
+     04 CARDS â uses 4 card_colors
+     ========================================================= */
+  .cards .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 60px;
+    z-index: 1;
+  }
+  .cards .head { display: flex; justify-content: space-between; align-items: flex-end; }
+  .cards h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 96px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1100px;
+  }
+  .cards h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .cards .head p {
+    font-size: 26px;
+    line-height: 1.55;
+    color: var(--dim);
+    max-width: 380px;
+    margin: 0;
+  }
+  .cards .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    flex: 1;
+  }
+  .cards .card {
+    border-radius: 6px;
+    padding: 40px 36px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .cards .card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(170deg, rgba(255,255,255,0.18) 0%, transparent 50%, rgba(0,0,0,0.25) 100%);
+    pointer-events: none;
+  }
+  .cards .card .num {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.18em;
+    opacity: 0.75;
+    position: relative;
+  }
+  .cards .card h3 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    margin: 0;
+    position: relative;
+  }
+  .cards .card p {
+    font-size: 24px;
+    line-height: 1.5;
+    margin: 16px 0 0;
+    opacity: 0.85;
+    position: relative;
+  }
+
+  /* =========================================================
+     05 QUOTE
+     ========================================================= */
+  .quote .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 200px 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 60px;
+    z-index: 1;
+  }
+  .quote .mark {
+    font-family: var(--font-display);
+    font-style: var(--display-italic, italic);
+    font-size: 240px;
+    line-height: 0.7;
+    color: var(--accent);
+    height: 0;
+    margin-left: -20px;
+  }
+  .quote blockquote {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 96px;
+    line-height: 1.1;
+    letter-spacing: -0.018em;
+    margin: 0;
+    max-width: 1500px;
+  }
+  .quote blockquote em { font-style: var(--display-italic, italic); }
+  .quote .who {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .quote .who::before {
+    content: "";
+    width: 80px; height: 2px;
+    background: var(--accent);
+  }
+  .quote .who b { color: var(--text); font-weight: 500; }
+
+  /* =========================================================
+     06 TWO-COL COMPARE
+     ========================================================= */
+  .compare .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 64px;
+    z-index: 1;
+  }
+  .compare h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 96px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1200px;
+  }
+  .compare h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .compare .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+  }
+  .compare .col {
+    border-top: 2px solid var(--accent);
+    padding: 36px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .compare .col .tag {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .compare .col h3 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 64px;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    margin: 0;
+  }
+  .compare .col ul {
+    list-style: none;
+    padding: 0; margin: 16px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .compare .col ul li {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 28px;
+    position: relative;
+  }
+  .compare .col ul li::before {
+    content: "â";
+    position: absolute;
+    left: 0; top: 0;
+    color: var(--accent);
+    font-family: var(--font-mono);
+  }
+
+  /* =========================================================
+     07 END
+     ========================================================= */
+  .end .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    z-index: 1;
+  }
+  .end h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 320px;
+    line-height: 0.92;
+    letter-spacing: -0.035em;
+    margin: 0;
+  }
+  .end h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .end .end-foot {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 48px;
+    padding-top: 40px;
+    border-top: 1px solid rgba(255,255,255,0.15);
+  }
+  .end .end-foot .item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .end .end-foot .item .k {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .end .end-foot .item .v {
+    font-family: var(--font-display);
+    font-size: 40px;
+    line-height: 1.1;
+  }
+  .end .end-foot .item .v em { font-style: var(--display-italic, italic); color: var(--accent); }
+
+
+  /* =========================================================
+     08 SECTION DIVIDER (full-bleed accent)
+     ========================================================= */
+  .section-divider {
+    background: var(--accent);
+    color: var(--panel-text);
+  }
+  .section-divider .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    z-index: 1;
+  }
+  .section-divider .section-num {
+    font-family: var(--font-mono);
+    font-size: 32px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    align-self: start;
+  }
+  .section-divider h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 240px;
+    line-height: 1;
+    letter-spacing: -0.035em;
+    margin: 0 0 40px;
+    align-self: end;
+    max-width: 1600px;
+  }
+  .section-divider h2 em { font-style: var(--display-italic, italic); }
+  .section-divider .section-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-top: 2px solid currentColor;
+    padding-top: 32px;
+    margin-top: 60px;
+    opacity: 0.85;
+  }
+  .section-divider .section-foot .lead {
+    font-family: var(--font-body);
+    font-size: 32px;
+    line-height: 1.4;
+    max-width: 900px;
+  }
+  .section-divider .section-foot .lead b { font-weight: 600; }
+  .section-divider .section-foot .of {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    letter-spacing: 0.2em;
+  }
+  .section-divider::after { display: none; } /* drop grain on solid accent */
+
+  /* =========================================================
+     09 KEY POINTS â vertical accent-bar list
+     ========================================================= */
+  .keypoints .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 52px;
+    z-index: 1;
+  }
+  .keypoints .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .keypoints h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 84px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1200px;
+  }
+  .keypoints h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .keypoints .head p {
+    font-size: 26px;
+    line-height: 1.5;
+    color: var(--dim);
+    max-width: 420px;
+    margin: 0;
+  }
+  .keypoints .list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex: 1;
+  }
+  .keypoints .pt {
+    border-left: 4px solid var(--accent);
+    padding: 22px 36px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 0 6px 6px 0;
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    align-items: baseline;
+    gap: 28px;
+  }
+  .keypoints .pt .ix {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+  }
+  .keypoints .pt .ttl {
+    font-family: var(--font-display);
+    font-size: 44px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  .keypoints .pt .body {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--dim);
+    margin: 0;
+  }
+
+  /* =========================================================
+     10 IMAGE-LEFT (image placeholder + bullets)
+     ========================================================= */
+  .imgleft .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-columns: 1fr 1.05fr;
+    gap: 80px;
+    z-index: 1;
+  }
+  .imgleft .img-slot {
+    background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.2) 100%);
+    border: 1px dashed rgba(255,255,255,0.18);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    overflow: hidden;
+    position: relative;
+  }
+  .imgleft .img-slot::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(45deg, transparent 49%, rgba(255,255,255,0.04) 50%, transparent 51%),
+      linear-gradient(-45deg, transparent 49%, rgba(255,255,255,0.04) 50%, transparent 51%);
+    background-size: 60px 60px;
+  }
+  .imgleft .img-slot .label {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    position: relative;
+  }
+  .imgleft .img-slot .cap {
+    font-family: var(--font-body);
+    font-size: 24px;
+    color: var(--dim);
+    text-align: center;
+    max-width: 380px;
+    position: relative;
+  }
+  .imgleft .rhs {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 32px;
+  }
+  .imgleft h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 84px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .imgleft h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .imgleft ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .imgleft ul li {
+    font-size: 26px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 36px;
+    position: relative;
+  }
+  .imgleft ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 16px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+
+  /* =========================================================
+     11 STEPS HORIZONTAL
+     ========================================================= */
+  .steps .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 80px;
+    z-index: 1;
+  }
+  .steps h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .steps h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .steps .track {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    position: relative;
+    flex: 1;
+    align-items: stretch;
+  }
+  .steps .track::before {
+    content: "";
+    position: absolute;
+    top: 38px;
+    left: 38px; right: 38px;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0.3;
+  }
+  .steps .step {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding-right: 32px;
+    position: relative;
+  }
+  .steps .step .num {
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--panel-text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 600;
+    position: relative;
+    z-index: 1;
+  }
+  .steps .step.current .num {
+    background: transparent;
+    border: 3px solid var(--accent);
+    color: var(--accent);
+  }
+  .steps .step h3 {
+    font-family: var(--font-display);
+    font-size: 40px;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .steps .step p {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--dim);
+    margin: 0;
+  }
+
+  /* =========================================================
+     12 THREE COLUMNS
+     ========================================================= */
+  .threecol .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 64px;
+    z-index: 1;
+  }
+  .threecol h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1400px;
+  }
+  .threecol h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .threecol .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 40px;
+    flex: 1;
+  }
+  .threecol .col {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 40px 36px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    border-top: 4px solid var(--accent);
+  }
+  .threecol .col .tag {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .threecol .col h3 {
+    font-family: var(--font-display);
+    font-size: 48px;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  .threecol .col p {
+    font-size: 24px;
+    line-height: 1.55;
+    color: var(--dim);
+    margin: 0;
+  }
+  .threecol .col ul {
+    list-style: none;
+    padding: 0; margin: 12px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .threecol .col ul li {
+    font-size: 24px;
+    line-height: 1.4;
+    color: var(--text);
+    padding-left: 24px;
+    position: relative;
+  }
+  .threecol .col ul li::before {
+    content: "Â·";
+    position: absolute;
+    left: 8px; top: -4px;
+    color: var(--accent);
+    font-size: 32px;
+  }
+
+  /* =========================================================
+     13 IMAGE FULLSCREEN OVERLAY
+     ========================================================= */
+  .imgfull {
+    background: var(--cover-bg);
+  }
+  .imgfull .img-slot-full {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 60% 40%, rgba(255,255,255,0.08) 0%, transparent 60%),
+      linear-gradient(140deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.5) 100%);
+  }
+  .imgfull .img-slot-full::before {
+    content: "[ Hero image \A drop your asset here ]";
+    white-space: pre;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.2em;
+    text-align: center;
+    color: rgba(255,255,255,0.25);
+    text-transform: uppercase;
+  }
+  .imgfull .img-slot-full::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(45deg, transparent 49.5%, rgba(255,255,255,0.04) 50%, transparent 50.5%),
+      linear-gradient(-45deg, transparent 49.5%, rgba(255,255,255,0.04) 50%, transparent 50.5%);
+    background-size: 80px 80px;
+  }
+  .imgfull .overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top,
+      rgba(0,0,0,0.92) 0%,
+      rgba(0,0,0,0.55) 40%,
+      rgba(0,0,0,0.15) 75%,
+      rgba(0,0,0,0) 100%);
+    z-index: 1;
+  }
+  .imgfull .body-wrap {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 0 120px 140px;
+    z-index: 2;
+  }
+  .imgfull .accent-bar {
+    width: 100px;
+    height: 3px;
+    background: var(--accent);
+    margin-bottom: 32px;
+  }
+  .imgfull h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 124px;
+    line-height: 0.96;
+    letter-spacing: -0.025em;
+    margin: 0 0 32px;
+    max-width: 1400px;
+    color: #ffffff;
+  }
+  .imgfull h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .imgfull p {
+    font-size: 28px;
+    line-height: 1.5;
+    color: rgba(255,255,255,0.75);
+    max-width: 1100px;
+    margin: 0;
+  }
+
+  /* =========================================================
+     14 SPLIT CONTRAST (before / after)
+     ========================================================= */
+  .splitcontrast {
+    background: transparent;
+  }
+  .splitcontrast .pair {
+    position: absolute; inset: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    z-index: 1;
+  }
+  .splitcontrast .side {
+    padding: 180px 96px 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 28px;
+    position: relative;
+  }
+  .splitcontrast .side.before {
+    background: linear-gradient(160deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.25) 100%), var(--cover-bg);
+    color: rgba(255,255,255,0.78);
+  }
+  .splitcontrast .side.after {
+    background: var(--cover-bg);
+  }
+  .splitcontrast .side .tag {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .splitcontrast .side .tag::before {
+    content: "";
+    width: 56px; height: 2px;
+    background: var(--accent);
+  }
+  .splitcontrast .side h3 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 700px;
+  }
+  .splitcontrast .side h3 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .splitcontrast .side ul {
+    list-style: none;
+    padding: 0; margin: 16px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .splitcontrast .side ul li {
+    font-size: 26px;
+    line-height: 1.5;
+    padding-left: 32px;
+    position: relative;
+  }
+  .splitcontrast .side.before ul li::before {
+    content: "Ã";
+    position: absolute; left: 0; top: -2px;
+    color: rgba(255,255,255,0.45);
+    font-family: var(--font-mono);
+    font-size: 28px;
+  }
+  .splitcontrast .side.after ul li::before {
+    content: "+";
+    position: absolute; left: 0; top: -2px;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 28px;
+  }
+
+
+  /* =========================================================
+     15 EDITORIAL LIGHT (paper background, dark themed text)
+     ========================================================= */
+  .editorial-light {
+    background: #f5f3ee;
+    color: #0b0d12;
+  }
+  .editorial-light::after {
+    /* drop grain on paper bg */
+    display: none;
+  }
+  /* Make chrome readable on paper bg */
+  .editorial-light .chrome-top,
+  .editorial-light .chrome-bot {
+    color: rgba(11, 13, 18, 0.5);
+  }
+  .editorial-light .chrome-top .dot,
+  .editorial-light .chrome-bot .dot {
+    background: var(--accent);
+  }
+
+  .editorial-light .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    grid-template-rows: auto 1fr auto;
+    gap: 56px 88px;
+    z-index: 1;
+  }
+  .editorial-light .eyebrow {
+    grid-column: 1 / -1;
+    font-family: var(--font-mono);
+    font-size: 26px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: rgba(11, 13, 18, 0.5);
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .editorial-light .eyebrow::before {
+    content: "";
+    width: 64px; height: 2px;
+    background: var(--accent);
+  }
+  .editorial-light h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 110px;
+    line-height: 0.98;
+    letter-spacing: -0.025em;
+    margin: 0;
+    color: #0b0d12;
+    grid-column: 1;
+  }
+  .editorial-light h2 em {
+    font-style: var(--display-italic, italic);
+    color: var(--accent);
+  }
+  .editorial-light .lede {
+    grid-column: 1;
+    align-self: start;
+    font-family: var(--font-body);
+    font-size: 28px;
+    line-height: 1.5;
+    color: rgba(11, 13, 18, 0.78);
+    max-width: 720px;
+    margin: 0;
+  }
+  .editorial-light .lede b {
+    color: #0b0d12;
+    font-weight: 600;
+  }
+  .editorial-light .sidebar {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+  .editorial-light .pull {
+    background: var(--accent);
+    color: var(--panel-text);
+    padding: 40px 36px;
+    border-radius: 6px;
+    position: relative;
+  }
+  .editorial-light .pull .mark {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 80px;
+    line-height: 0.8;
+    margin-bottom: 8px;
+    opacity: 0.6;
+  }
+  .editorial-light .pull blockquote {
+    font-family: var(--font-display);
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 0 0 20px;
+    letter-spacing: -0.01em;
+  }
+  .editorial-light .pull blockquote em { font-style: var(--display-italic, italic); }
+  .editorial-light .pull .who {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+  .editorial-light .meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: rgba(11, 13, 18, 0.55);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .editorial-light .meta .k { opacity: 0.6; }
+  .editorial-light .meta .v {
+    color: #0b0d12;
+    letter-spacing: 0.06em;
+  }
+  .editorial-light .meta .v.accent { color: var(--accent); }
+  .editorial-light .footline {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    border-top: 1px solid rgba(11, 13, 18, 0.15);
+    padding-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: rgba(11, 13, 18, 0.55);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .editorial-light .footline b { color: var(--accent); font-weight: 500; }
+
+
+  /* =========================================================
+     .light MODIFIER â paper/cream background variant
+     Apply alongside any layout class: <section class="slide stat light">
+     Flips background, text color, and dim/border tones. Accent stays.
+     ========================================================= */
+  .slide.light {
+    background: #f5f3ee;
+    color: #0b0d12;
+  }
+  .slide.light::after { display: none; }
+
+  /* Headings + display text */
+  .slide.light h2,
+  .slide.light h3,
+  .slide.light .ttl,
+  .slide.light .big,
+  .slide.light .num {
+    color: #0b0d12;
+  }
+  .slide.light h2 em,
+  .slide.light h3 em,
+  .slide.light .ttl em,
+  .slide.light .big em { color: var(--accent); }
+
+  /* Muted text */
+  .slide.light p,
+  .slide.light .lbl,
+  .slide.light .body,
+  .slide.light .head p,
+  .slide.light .kicker,
+  .slide.light .note,
+  .slide.light .step p,
+  .slide.light .lhs p,
+  .slide.light .pt .body,
+  .slide.light .col p {
+    color: rgba(11, 13, 18, 0.65);
+  }
+  .slide.light .kicker b,
+  .slide.light .note b { color: var(--accent); }
+
+  /* List item backgrounds (key points, three-col) */
+  .slide.light .pt,
+  .slide.light .col {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  /* Three-col: keep accent top border, add subtle outer */
+  .slide.light.threecol .col {
+    border-top-color: var(--accent);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.08);
+  }
+  /* Key points keep accent left border + accent ix label */
+  .slide.light .pt {
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  /* Lists â bullet color stays accent, text dark */
+  .slide.light .col ul li,
+  .slide.light.imgleft ul li,
+  .slide.light.compare .col ul li {
+    color: #0b0d12;
+  }
+
+  /* Stat: top border stays accent */
+  .slide.light.stat .nums .n { border-top-color: var(--accent); }
+  .slide.light.stat .note {
+    border-top-color: rgba(11, 13, 18, 0.15);
+    color: rgba(11, 13, 18, 0.6);
+  }
+
+  /* Steps: track line dimmer */
+  .slide.light.steps .track::before {
+    background: rgba(11, 13, 18, 0.15);
+  }
+
+  /* Compare cols top border stays accent */
+  .slide.light.compare .col {
+    border-top-color: var(--accent);
+  }
+  .slide.light.compare .col ul li { color: #0b0d12; }
+
+  /* Agenda: borders dim on light */
+  .slide.light.agenda ol li {
+    border-top-color: rgba(11, 13, 18, 0.12);
+  }
+  .slide.light.agenda ol li:last-child {
+    border-bottom-color: rgba(11, 13, 18, 0.12);
+  }
+  .slide.light.agenda ol li .ttl { color: #0b0d12; }
+  .slide.light.agenda ol li::before { color: var(--accent); }
+
+
+  /* =========================================================
+     TOC â numbered table of contents (no durations)
+     ========================================================= */
+  .toc .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 60px;
+    z-index: 1;
+  }
+  .toc h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .toc h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .toc .toc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 80px;
+    flex: 1;
+    align-content: start;
+  }
+  .toc .toc-row {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    align-items: baseline;
+    padding: 22px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    column-gap: 24px;
+  }
+  .toc .toc-row .n {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+  .toc .toc-row .t {
+    font-family: var(--font-display);
+    font-size: 36px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+  }
+
+  /* =========================================================
+     TWO CONTENTS IN A SLIDE â 2 distinct labeled blocks
+     ========================================================= */
+  .twocontents .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+    z-index: 1;
+  }
+  .twocontents h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .twocontents h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .twocontents .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 64px;
+    flex: 1;
+  }
+  .twocontents .block {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .twocontents .block h3 {
+    font-family: var(--font-display);
+    font-size: 48px;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    margin: 0;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--accent);
+  }
+  .twocontents .block ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .twocontents .block ul li {
+    font-size: 26px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .twocontents .block ul li::before {
+    content: "Â·";
+    position: absolute; left: 8px; top: -8px;
+    color: var(--accent);
+    font-size: 36px;
+  }
+
+  /* =========================================================
+     TWO COLS BULLETS â single list split into 2 cols
+     ========================================================= */
+  .twocols .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+    z-index: 1;
+  }
+  .twocols h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .twocols h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .twocols .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px 80px;
+    flex: 1;
+    align-content: start;
+  }
+  .twocols .grid li {
+    font-size: 28px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 36px;
+    position: relative;
+    list-style: none;
+    margin: 0;
+  }
+  .twocols .grid ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .twocols .grid li::before {
+    content: "â";
+    position: absolute; left: 0; top: 0;
+    color: var(--accent);
+  }
+
+  /* =========================================================
+     NUMBERED CONCLUSIONS â numbered key takeaways
+     ========================================================= */
+  .numconcl .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+    z-index: 1;
+  }
+  .numconcl h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .numconcl h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .numconcl .list {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    flex: 1;
+  }
+  .numconcl .row {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 32px;
+    align-items: baseline;
+    padding: 18px 0;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  .numconcl .row:last-child { border-bottom: 1px solid rgba(255,255,255,0.12); }
+  .numconcl .row .n {
+    font-family: var(--font-display);
+    font-size: 72px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  .numconcl .row .t {
+    font-family: var(--font-display);
+    font-size: 40px;
+    line-height: 1.15;
+    margin: 0 0 8px;
+  }
+  .numconcl .row .b {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--dim);
+    margin: 0;
+  }
+
+  /* =========================================================
+     COMPARISON TABLE â themed data table
+     ========================================================= */
+  .cmptable .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+    z-index: 1;
+  }
+  .cmptable h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .cmptable h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .cmptable .tbl-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .cmptable table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-body);
+    font-size: 26px;
+  }
+  .cmptable th, .cmptable td {
+    text-align: left;
+    padding: 18px 24px;
+    line-height: 1.4;
+  }
+  .cmptable thead th {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    padding: 12px 24px 18px;
+  }
+  .cmptable tbody tr { border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .cmptable tbody td:first-child { font-weight: 600; }
+  .cmptable .caption {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: var(--dim);
+    letter-spacing: 0.06em;
+    padding-top: 8px;
+  }
+
+  /* =========================================================
+     FORMULA â title + big LaTeX-styled equation + body bullets
+     ========================================================= */
+  .formula .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+    z-index: 1;
+  }
+  .formula h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 84px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .formula h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .formula .eq-wrap {
+    background: rgba(255,255,255,0.04);
+    border-left: 4px solid var(--accent);
+    padding: 64px 80px;
+    border-radius: 0 8px 8px 0;
+  }
+  .formula .eq {
+    font-family: 'Cormorant Garamond', 'Times New Roman', Georgia, serif;
+    font-style: italic;
+    font-size: 88px;
+    line-height: 1.2;
+    text-align: center;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: visible;
+  }
+  .formula .eq .accent { color: var(--accent); font-style: normal; }
+  .formula .eq sub, .formula .eq sup {
+    font-size: 0.55em;
+    font-style: normal;
+  }
+  .formula ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .formula ul li {
+    font-size: 26px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .formula ul li::before {
+    content: "";
+    position: absolute; left: 0; top: 16px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+
+  /* =========================================================
+     RESEARCH QUESTION â main RQ box + sub-questions cards
+     ========================================================= */
+  .rquestion .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+    z-index: 1;
+  }
+  .rquestion h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 80px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .rquestion h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .rquestion .main-rq {
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    padding: 40px 56px;
+    background: rgba(255,255,255,0.04);
+  }
+  .rquestion .main-rq .lbl {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .rquestion .main-rq .q {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 48px;
+    line-height: 1.2;
+    color: var(--text);
+    margin: 0;
+  }
+  .rquestion .subs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+    flex: 1;
+  }
+  .rquestion .sub {
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .rquestion .sub .lbl {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .rquestion .sub .q {
+    font-size: 26px;
+    line-height: 1.4;
+    color: var(--text);
+    margin: 0;
+  }
+
+  /* =========================================================
+     GRID 2Ã2 â 4 cells with icon/title/body
+     ========================================================= */
+  .grid2x2 .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+    z-index: 1;
+  }
+  .grid2x2 h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .grid2x2 h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .grid2x2 .cells {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 24px;
+    flex: 1;
+  }
+  .grid2x2 .cell {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    padding: 36px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: rgba(255,255,255,0.03);
+  }
+  .grid2x2 .cell .dash {
+    width: 40px; height: 4px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  .grid2x2 .cell h3 {
+    font-family: var(--font-display);
+    font-size: 44px;
+    line-height: 1.05;
+    margin: 0;
+  }
+  .grid2x2 .cell p {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--dim);
+    margin: 0;
+  }
+
+  /* =========================================================
+     PRICING CARDS â 3 cards, middle highlighted
+     ========================================================= */
+  .pricing .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+    z-index: 1;
+  }
+  .pricing h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 84px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .pricing h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .pricing .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+    flex: 1;
+  }
+  .pricing .card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 40px 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    position: relative;
+  }
+  .pricing .card.featured {
+    border-color: var(--accent);
+    border-width: 2px;
+    background: rgba(255,255,255,0.06);
+  }
+  .pricing .card.featured .badge {
+    position: absolute;
+    top: -16px; right: 28px;
+    background: var(--accent);
+    color: var(--panel-text);
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-weight: 500;
+  }
+  .pricing .card .name {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .pricing .card .price {
+    font-family: var(--font-display);
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  .pricing .card .price small {
+    font-size: 28px;
+    color: var(--dim);
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    margin-left: 4px;
+  }
+  .pricing .card ul {
+    list-style: none;
+    padding: 0; margin: 8px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    flex: 1;
+  }
+  .pricing .card ul li {
+    font-size: 24px;
+    line-height: 1.4;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .pricing .card ul li::before {
+    content: "â";
+    position: absolute; left: 0; top: 0;
+    color: var(--accent);
+    font-family: var(--font-mono);
+  }
+
+  /* =========================================================
+     CONCLUSION CARDS WITH TIMELINE
+     ========================================================= */
+  .conclcards .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+    z-index: 1;
+  }
+  .conclcards h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+    max-width: 1300px;
+  }
+  .conclcards h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .conclcards .timeline {
+    position: relative;
+    margin: 24px 80px 0;
+  }
+  .conclcards .timeline-line {
+    position: absolute;
+    top: 28px;
+    left: 0; right: 0;
+    height: 2px;
+    background: rgba(255,255,255,0.2);
+  }
+  .conclcards .timeline-dots {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: relative;
+  }
+  .conclcards .timeline-dots > div {
+    display: flex;
+    justify-content: center;
+  }
+  .conclcards .timeline-dots .dot {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid var(--card-color);
+    position: relative;
+    z-index: 1;
+  }
+  .conclcards .cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    flex: 1;
+  }
+  .conclcards .card {
+    border-radius: 8px;
+    padding: 28px 28px 32px;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .conclcards .card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(170deg, rgba(255,255,255,0.15) 0%, transparent 50%, rgba(0,0,0,0.2) 100%);
+    pointer-events: none;
+  }
+  .conclcards .card .num {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 32px;
+    line-height: 1;
+    position: relative;
+  }
+  .conclcards .card h3 {
+    font-family: var(--font-display);
+    font-size: 32px;
+    line-height: 1.15;
+    margin: 0;
+    position: relative;
+  }
+  .conclcards .card p {
+    font-size: 24px;
+    line-height: 1.45;
+    margin: 0;
+    opacity: 0.92;
+    position: relative;
+  }
+
+
+  /* Threecol body text */
+  .slide.light.threecol .col p { color: rgba(11,13,18,0.65); }
+  .slide.light.threecol .col h3 { color: #0b0d12; }
+  .slide.light.threecol .col ul li { color: #0b0d12; }
+
+  /* Steps body text */
+  .slide.light.steps .step h3 { color: #0b0d12; }
+  .slide.light.steps .step p { color: rgba(11,13,18,0.65); }
+  /* Make step number stay visible on cream â keep accent bg, dark text */
+  .slide.light.steps .step .num { color: var(--panel-text); }
+  .slide.light.steps .step.current .num { color: var(--accent); }
+
+  /* Key points body text */
+  .slide.light.keypoints .pt .ttl { color: #0b0d12; }
+  .slide.light.keypoints .pt .body { color: rgba(11,13,18,0.65); }
+
+  /* Stat body text */
+  .slide.light.stat .nums .big { color: #0b0d12; }
+  .slide.light.stat .nums .lbl { color: rgba(11,13,18,0.65); }
+  .slide.light.stat .kicker { color: rgba(11,13,18,0.65); }
+
+  /* Compare body text */
+  .slide.light.compare .col h3 { color: #0b0d12; }
+
+  /* Numconcl body text override */
+  .slide.light.numconcl .row .b { color: rgba(11,13,18,0.65) !important; }
+
+  /* Conclusion cards: timeline dots ring color from --card-color stays, but base ring becomes light cream so visible */
+  .slide.light.conclcards .timeline-dots .dot { background: #f5f3ee; }
+
+  /* Editorial light cards/numbers already dark via base. Make pull quote text contrast: */
+  /* (pull-quote uses var(--panel-text) which depends on theme.panel â for dark-panel themes that's #0b0d12 = dark on accent = OK; for light-panel themes that's #fff = white on accent = OK) */
+
+  /* === END .light extensions for new layouts === */
+
+  /* TOC light */
+  .slide.light .toc-row { border-bottom-color: rgba(11,13,18,0.12); }
+  .slide.light .toc-row .t { color: #0b0d12; }
+  .slide.light .toc-row .n { color: var(--accent); }
+
+  /* Two contents light */
+  .slide.light.twocontents .block h3 { color: #0b0d12; border-bottom-color: var(--accent); }
+  .slide.light.twocontents .block ul li { color: #0b0d12; }
+
+  /* Two cols bullets light */
+  .slide.light.twocols .grid li { color: #0b0d12; }
+
+  /* Numbered conclusions light */
+  .slide.light.numconcl .row { border-top-color: rgba(11,13,18,0.12); }
+  .slide.light.numconcl .row:last-child { border-bottom-color: rgba(11,13,18,0.12); }
+  .slide.light.numconcl .row .t { color: #0b0d12; }
+  .slide.light.numconcl .row .n { color: var(--accent); }
+  .slide.light.numconcl .row .b { color: rgba(11,13,18,0.65); }
+
+  /* Comparison table light */
+  .slide.light.cmptable table { color: #0b0d12; }
+  .slide.light.cmptable tbody tr { border-bottom-color: rgba(11,13,18,0.12); }
+  .slide.light.cmptable thead th { color: var(--accent); border-bottom-color: var(--accent); }
+  .slide.light.cmptable .caption { color: rgba(11,13,18,0.55); }
+
+  /* Formula light */
+  .slide.light.formula .eq-wrap {
+    background: rgba(0,0,0,0.04);
+    border-left-color: var(--accent);
+  }
+  .slide.light.formula .eq { color: #0b0d12; }
+  .slide.light.formula .eq .accent { color: var(--accent); }
+  .slide.light.formula ul li { color: #0b0d12; }
+
+  /* Research question light */
+  .slide.light.rquestion .main-rq {
+    background: rgba(0,0,0,0.04);
+    border-color: var(--accent);
+  }
+  .slide.light.rquestion .main-rq .q { color: #0b0d12; }
+  .slide.light.rquestion .sub {
+    background: rgba(0,0,0,0.04);
+    border: 1px solid rgba(11,13,18,0.1);
+  }
+  .slide.light.rquestion .sub .q { color: #0b0d12; }
+
+  /* Grid 2x2 light */
+  .slide.light.grid2x2 .cell {
+    background: rgba(0,0,0,0.03);
+    border-color: rgba(11,13,18,0.12);
+  }
+  .slide.light.grid2x2 .cell h3 { color: #0b0d12; }
+  .slide.light.grid2x2 .cell p { color: rgba(11,13,18,0.65); }
+
+  /* Pricing cards light */
+  .slide.light.pricing .card {
+    background: rgba(0,0,0,0.03);
+    border-color: rgba(11,13,18,0.15);
+  }
+  .slide.light.pricing .card.featured {
+    background: rgba(0,0,0,0.06);
+    border-color: var(--accent);
+  }
+  .slide.light.pricing .card .name { color: rgba(11,13,18,0.55); }
+  .slide.light.pricing .card .price { color: var(--accent); }
+  .slide.light.pricing .card .price small { color: rgba(11,13,18,0.55); }
+  .slide.light.pricing .card ul li { color: #0b0d12; }
+
+  /* Conclusion cards w/ timeline light */
+  .slide.light.conclcards .timeline-line { background: rgba(11,13,18,0.15); }
+  /* Cards keep their themed background â text stays white inside cards, no override needed */
+
+  /* Quote light */
+  .slide.light.quote .mark { color: var(--accent); }
+  .slide.light.quote blockquote { color: #0b0d12; }
+  .slide.light.quote .who { color: rgba(11,13,18,0.6); }
+  .slide.light.quote .who b { color: #0b0d12; }
+
+  /* Image-left light */
+  .slide.light.imgleft .img-slot {
+    background: linear-gradient(135deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.08) 100%);
+    border-color: rgba(11,13,18,0.2);
+  }
+  .slide.light.imgleft .img-slot .label,
+  .slide.light.imgleft .img-slot .cap { color: rgba(11,13,18,0.55); }
+  .slide.light.imgleft .img-slot::before {
+    background-image:
+      linear-gradient(45deg, transparent 49%, rgba(11,13,18,0.06) 50%, transparent 51%),
+      linear-gradient(-45deg, transparent 49%, rgba(11,13,18,0.06) 50%, transparent 51%);
+  }
+  .slide.light.imgleft ul li { color: #0b0d12; }
+
+  /* Compare/Trade-offs light */
+  .slide.light.compare .col ul li::before { color: var(--accent); }
+
+
+  /* =========================================================
+     IMAGE LAYOUTS â variants (right/above/below + two-image)
+     Shared: img-slot styling reuses imgleft .img-slot baseline
+     ========================================================= */
+
+  /* Shared image-slot styling for new layouts */
+  .imgright .img-slot,
+  .imgabove .img-slot,
+  .imgbelow .img-slot,
+  .twoimgright .img-slot,
+  .twoimgleft .img-slot,
+  .twoimgabove .img-slot,
+  .twoimgbelow .img-slot {
+    background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.2) 100%);
+    border: 1px dashed rgba(255,255,255,0.18);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    overflow: hidden;
+    position: relative;
+  }
+  .imgright .img-slot::before,
+  .imgabove .img-slot::before,
+  .imgbelow .img-slot::before,
+  .twoimgright .img-slot::before,
+  .twoimgleft .img-slot::before,
+  .twoimgabove .img-slot::before,
+  .twoimgbelow .img-slot::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(45deg, transparent 49%, rgba(255,255,255,0.04) 50%, transparent 51%),
+      linear-gradient(-45deg, transparent 49%, rgba(255,255,255,0.04) 50%, transparent 51%);
+    background-size: 60px 60px;
+  }
+  .imgright .img-slot .label,
+  .imgabove .img-slot .label,
+  .imgbelow .img-slot .label,
+  .twoimgright .img-slot .label,
+  .twoimgleft .img-slot .label,
+  .twoimgabove .img-slot .label,
+  .twoimgbelow .img-slot .label {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    position: relative;
+  }
+
+  /* IMAGE RIGHT â text left, image right (mirror of imgleft) */
+  .imgright .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 80px;
+    z-index: 1;
+  }
+  .imgright .lhs {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 32px;
+  }
+  .imgright h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 84px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .imgright h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .imgright ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .imgright ul li {
+    font-size: 26px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 36px;
+    position: relative;
+  }
+  .imgright ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 16px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+
+  /* IMAGE ABOVE â title, image (large), bullets below */
+  .imgabove .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    z-index: 1;
+  }
+  .imgabove h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 72px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .imgabove h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .imgabove .img-slot {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+  }
+  .imgabove ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+  .imgabove ul li {
+    flex: 1;
+    min-width: 280px;
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .imgabove ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 14px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+
+  /* IMAGE BELOW â title, bullets, image below */
+  .imgbelow .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    z-index: 1;
+  }
+  .imgbelow h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 72px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .imgbelow h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .imgbelow ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+  .imgbelow ul li {
+    flex: 1;
+    min-width: 280px;
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .imgbelow ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 14px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+  .imgbelow .img-slot {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+  }
+
+  /* TWO IMAGE RIGHT â text left, 2 stacked images right */
+  .twoimgright .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-columns: 1fr 0.7fr;
+    gap: 56px;
+    z-index: 1;
+  }
+  .twoimgright .lhs {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 32px;
+  }
+  .twoimgright h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 80px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .twoimgright h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .twoimgright ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .twoimgright ul li {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .twoimgright ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 14px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+  .twoimgright .imgs {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .twoimgright .imgs .img-slot {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* TWO IMAGE LEFT â 2 stacked images left, text right */
+  .twoimgleft .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: grid;
+    grid-template-columns: 0.7fr 1fr;
+    gap: 56px;
+    z-index: 1;
+  }
+  .twoimgleft .imgs {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .twoimgleft .imgs .img-slot {
+    flex: 1;
+    min-height: 0;
+  }
+  .twoimgleft .rhs {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 32px;
+  }
+  .twoimgleft h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 80px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .twoimgleft h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .twoimgleft ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .twoimgleft ul li {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .twoimgleft ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 14px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+
+  /* TWO IMAGE ABOVE â title, 2 images side-by-side, text below */
+  .twoimgabove .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    z-index: 1;
+  }
+  .twoimgabove h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 64px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .twoimgabove h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .twoimgabove .imgs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    flex: 1;
+    min-height: 0;
+  }
+  .twoimgabove ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+  .twoimgabove ul li {
+    flex: 1;
+    min-width: 280px;
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .twoimgabove ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 14px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+
+  /* TWO IMAGE BELOW â title, text, 2 images side-by-side below */
+  .twoimgbelow .body-wrap {
+    position: absolute; inset: 0;
+    padding: 180px 120px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    z-index: 1;
+  }
+  .twoimgbelow h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 64px;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .twoimgbelow h2 em { font-style: var(--display-italic, italic); color: var(--accent); }
+  .twoimgbelow ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+  .twoimgbelow ul li {
+    flex: 1;
+    min-width: 280px;
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--text);
+    padding-left: 32px;
+    position: relative;
+  }
+  .twoimgbelow ul li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 14px;
+    width: 18px; height: 2px;
+    background: var(--accent);
+  }
+  .twoimgbelow .imgs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* === .light extensions for image layouts === */
+  .slide.light.imgright .img-slot,
+  .slide.light.imgabove .img-slot,
+  .slide.light.imgbelow .img-slot,
+  .slide.light.twoimgright .img-slot,
+  .slide.light.twoimgleft .img-slot,
+  .slide.light.twoimgabove .img-slot,
+  .slide.light.twoimgbelow .img-slot {
+    background: linear-gradient(135deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.08) 100%);
+    border-color: rgba(11,13,18,0.2);
+  }
+  .slide.light.imgright .img-slot .label,
+  .slide.light.imgabove .img-slot .label,
+  .slide.light.imgbelow .img-slot .label,
+  .slide.light.twoimgright .img-slot .label,
+  .slide.light.twoimgleft .img-slot .label,
+  .slide.light.twoimgabove .img-slot .label,
+  .slide.light.twoimgbelow .img-slot .label {
+    color: rgba(11,13,18,0.55);
+  }
+  .slide.light.imgright .img-slot::before,
+  .slide.light.imgabove .img-slot::before,
+  .slide.light.imgbelow .img-slot::before,
+  .slide.light.twoimgright .img-slot::before,
+  .slide.light.twoimgleft .img-slot::before,
+  .slide.light.twoimgabove .img-slot::before,
+  .slide.light.twoimgbelow .img-slot::before {
+    background-image:
+      linear-gradient(45deg, transparent 49%, rgba(11,13,18,0.06) 50%, transparent 51%),
+      linear-gradient(-45deg, transparent 49%, rgba(11,13,18,0.06) 50%, transparent 51%);
+  }
+  .slide.light.imgright ul li,
+  .slide.light.imgabove ul li,
+  .slide.light.imgbelow ul li,
+  .slide.light.twoimgright ul li,
+  .slide.light.twoimgleft ul li,
+  .slide.light.twoimgabove ul li,
+  .slide.light.twoimgbelow ul li { color: #0b0d12; }
+
+
+  /* =========================================================
+     FIGURE â wraps .img-slot with a figcaption below
+     Shared across all image layouts
+     ========================================================= */
+  .slide figure {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 0;
+    min-height: 0;
+  }
+  .slide figure .img-slot {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+  }
+  .slide figcaption {
+    font-family: var(--font-body);
+    font-size: 24px;
+    line-height: 1.4;
+    color: var(--dim);
+    text-align: center;
+    font-weight: 500;
+  }
+  .slide figcaption b { color: var(--text); }
+  .slide.light figcaption { color: rgba(11,13,18,0.6); }
+  .slide.light figcaption b { color: #0b0d12; }
+  /* In multi-image layouts, smaller caption */
+  .twoimgright figcaption,
+  .twoimgleft figcaption,
+  .twoimgabove figcaption,
+  .twoimgbelow figcaption { font-size: 24px; }
+
+  /* =========================================================
+     TWEAKS PANEL
+     ========================================================= */
+  .tw-panel {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 280px;
+    background: rgba(20, 20, 24, 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 18px 18px 16px;
+    color: #f5f5f5;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    z-index: 9999;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    display: none;
+  }
+  .tw-panel.show { display: block; }
+  .tw-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    margin-bottom: 14px;
+  }
+  .tw-head .title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+  }
+  .tw-head .x {
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    color: rgba(255,255,255,0.5);
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+  }
+  .tw-head .x:hover { color: #fff; }
+  .tw-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 8px;
+  }
+  .tw-themes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+  .tw-themes button {
+    cursor: pointer;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 10px 10px 9px;
+    color: #f5f5f5;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    text-align: left;
+    transition: background 0.15s, border 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .tw-themes button:hover {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.15);
+  }
+  .tw-themes button.active {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.3);
+  }
+  .tw-themes button .sw {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
+    flex-shrink: 0;
+  }
+  .tw-themes button .nm {
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
+  }
+  .tw-themes button .col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .tw-themes button .fn {
+    font-size: 10px;
+    color: rgba(255,255,255,0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .tw-note {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    line-height: 1.5;
+  }
+  .tw-note b { color: rgba(255,255,255,0.7); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<deck-stage>
+
+  <!-- 01 COVER -->
+  <section class="slide cover" data-screen-label="01 Cover">
+    <div class="body-wrap">
+      <div class="eyebrow"></div>
+      <h1 data-fit data-fit-lines="2" data-fit-min="120">The shape<br/>of <em>good work</em>.</h1>
+      <div class="meta-row">
+        <div class="by">A working notebook on <b>craft, focus, and shipping</b> â across teams and time zones.</div>
+        <div class="date">19 / 05 / 2026<br/>Issue â&nbsp;01</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 AGENDA -->
+  <section class="slide body agenda" data-screen-label="02 Agenda">
+    <div class="body-wrap">
+      <div class="lhs">
+        <h2 data-fit data-fit-lines="2" data-fit-min="64">What we'll <em>cover</em>.</h2>
+        <p>Five short sections. Read in order, or jump to what you need â every page is self-contained.</p>
+      </div>
+      <ol>
+        <li><span class="ttl">Where we are</span><span class="dur">8 min</span></li>
+        <li><span class="ttl">What changed</span><span class="dur">12 min</span></li>
+        <li><span class="ttl">The proposal</span><span class="dur">15 min</span></li>
+        <li><span class="ttl">Trade-offs</span><span class="dur">10 min</span></li>
+        <li><span class="ttl">Next steps</span><span class="dur">5 min</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 03 STAT -->
+  <section class="slide body stat" data-screen-label="03 Numbers">
+    <div class="body-wrap">
+      <div class="kicker">By the <b>numbers</b> â measured against last cycle</div>
+      <div class="nums">
+        <div class="n">
+          <div class="big">2.4<em>Ã</em></div>
+          <div class="lbl">Faster median ship time across product surfaces.</div>
+        </div>
+        <div class="n">
+          <div class="big">68<em>%</em></div>
+          <div class="lbl">Of work now closed within the same week it opened.</div>
+        </div>
+        <div class="n">
+          <div class="big">11</div>
+          <div class="lbl">Net-new initiatives moved out of draft this quarter.</div>
+        </div>
+      </div>
+      <div class="note">Sample: 142 closed items Â· period Jan 04 â Mar 28 Â· excludes one-off ops tickets.</div>
+    </div>
+  </section>
+
+  <!-- 04 CARDS -->
+  <section class="slide body cards" data-screen-label="04 Cards">
+    <div class="body-wrap">
+      <div class="head">
+        <h2>Four <em>directions</em><br/>we're investing in.</h2>
+        <p>Each pillar has an owner, a measurable outcome, and a one-page brief.</p>
+      </div>
+      <div class="grid">
+        <div class="card" style="background: var(--c1);">
+          <div class="num">01</div>
+          <div>
+            <h3>Foundations</h3>
+            <p>Pay down debt in the parts of the system we touch every week.</p>
+          </div>
+        </div>
+        <div class="card" style="background: var(--c2);">
+          <div class="num">02</div>
+          <div>
+            <h3>Velocity</h3>
+            <p>Cut the loop time between idea and shipped surface in half.</p>
+          </div>
+        </div>
+        <div class="card" style="background: var(--c3);">
+          <div class="num">03</div>
+          <div>
+            <h3>Quality</h3>
+            <p>Raise the floor â boring, reliable, predictable in the dull bits.</p>
+          </div>
+        </div>
+        <div class="card" style="background: var(--c4);">
+          <div class="num">04</div>
+          <div>
+            <h3>Reach</h3>
+            <p>Get the work in front of the people it was built to serve.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 QUOTE -->
+  <section class="slide body quote" data-screen-label="05 Quote">
+    <div class="body-wrap">
+      <div class="mark">"</div>
+      <blockquote data-fit data-fit-lines="3" data-fit-min="48">The work is to keep the <em>important</em> things easy, and let the rest stay difficult.</blockquote>
+      <div class="who"><span><b>A. Reviewer</b> Â· internal review Â· April</span></div>
+    </div>
+  </section>
+
+  <!-- 06 COMPARE -->
+  <section class="slide body compare" data-screen-label="06 Trade-offs">
+    <div class="body-wrap">
+      <h2>What we're <em>choosing</em><br/>and what we're letting go.</h2>
+      <div class="cols">
+        <div class="col">
+          <div class="tag">Yes</div>
+          <h3>We will</h3>
+          <ul>
+            <li>Ship fewer, larger things to fewer, better-served users.</li>
+            <li>Cut review meetings in half and put the time into making.</li>
+            <li>Publish the brief before the build, every time.</li>
+            <li>Default to async writing for any decision worth keeping.</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="tag">No</div>
+          <h3>We won't</h3>
+          <ul>
+            <li>Chase every adjacent surface area "while we're in there".</li>
+            <li>Open work without a written, dated end-state in mind.</li>
+            <li>Run a meeting that could be a paragraph and a poll.</li>
+            <li>Confuse busy with productive on the weekly review.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 SECTION DIVIDER -->
+  <section class="slide section-divider" data-screen-label="07 Section">
+    <div class="body-wrap">
+      <div class="section-num">Part â 02 / 04</div>
+      <h2 data-fit data-fit-lines="1" data-fit-min="120">The <em>proposal</em>.</h2>
+      <div class="section-foot">
+        <div class="lead">Three concrete shifts in how we plan, write, and ship â with owners, deadlines, and a way to know weâre on track.</div>
+        <div class="of">07 â 11</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 KEY POINTS -->
+  <section class="slide body keypoints" data-screen-label="08 Key points">
+    <div class="body-wrap">
+      <div class="head">
+        <h2>Three <em>principles</em><br/>we hold to.</h2>
+        <p>Internal guardrails. Read them, argue with them, then live by them.</p>
+      </div>
+      <div class="list">
+        <div class="pt"><div class="ix">PÂ·01</div><div><h3 class="ttl">Write before you build</h3><p class="body">A one-page brief beats a three-hour meeting, every time. No exceptions.</p></div></div>
+        <div class="pt"><div class="ix">PÂ·02</div><div><h3 class="ttl">Default to async</h3><p class="body">If a decision is worth keeping, itâs worth writing down where everyone can find it later.</p></div></div>
+        <div class="pt"><div class="ix">PÂ·03</div><div><h3 class="ttl">Measure what hurts</h3><p class="body">Pick the metric that would make you change behavior. Ignore the rest of the dashboard.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 IMAGE LEFT -->
+  <section class="slide body imgleft" data-screen-label="09 Image + bullets">
+    <div class="body-wrap">
+      <figure>
+        <div class="img-slot">
+          <div class="label">Image</div>
+        </div>
+        <figcaption><b>Figure 1.</b> Internal case Â· 9-day implementation, 4-cohort rollout.</figcaption>
+      </figure>
+      <div class="rhs">
+        <h2>A small <em>change</em>, measured carefully.</h2>
+        <ul>
+          <li>Shipped on a Tuesday. Pulled the dashboard the same week.</li>
+          <li>Lift held across three of four cohorts â the fourth was a known outlier.</li>
+          <li>Cost: one engineer for nine days. No new infra, no new dependencies.</li>
+          <li>Now standard on every new surface that touches the same flow.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 STEPS -->
+  <section class="slide body steps" data-screen-label="10 Steps">
+    <div class="body-wrap">
+      <h2>From idea to <em>shipped</em>,<br/>in four steps.</h2>
+      <div class="track">
+        <div class="step">
+          <div class="num">1</div>
+          <h3>Brief</h3>
+          <p>One page. End-state, scope, owners, and the date we plan to be done.</p>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <h3>Build</h3>
+          <p>Smallest possible thing that proves the idea, in front of real people.</p>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <h3>Review</h3>
+          <p>Written first, meeting second. Decisions go on the brief, not into Slack.</p>
+        </div>
+        <div class="step current">
+          <div class="num">4</div>
+          <h3>Ship &amp; learn</h3>
+          <p>Roll it out. Watch the metric that mattered. Write down what you learned.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 THREE COLUMNS -->
+  <section class="slide body threecol" data-screen-label="11 Three columns">
+    <div class="body-wrap">
+      <h2>Three <em>bets</em> for the next six months.</h2>
+      <div class="grid">
+        <div class="col">
+          <div class="tag">Bet Â· 01</div>
+          <h3>Foundations</h3>
+          <p>Pay down debt in the parts of the system we touch every week.</p>
+          <ul>
+            <li>Replace the legacy router</li>
+            <li>One auth path, one session model</li>
+            <li>Migrate the three slowest endpoints</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="tag">Bet Â· 02</div>
+          <h3>Velocity</h3>
+          <p>Cut the loop time between idea and shipped surface in half.</p>
+          <ul>
+            <li>Preview deploys on every branch</li>
+            <li>Async review by default</li>
+            <li>Briefs published before code is opened</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="tag">Bet Â· 03</div>
+          <h3>Reach</h3>
+          <p>Get the work in front of the people it was built to serve.</p>
+          <ul>
+            <li>Onboarding rewrite</li>
+            <li>Empty-state passes</li>
+            <li>First-week email sequence</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 IMAGE FULLSCREEN OVERLAY -->
+  <section class="slide imgfull" data-screen-label="12 Hero image">
+    <div class="img-slot-full"></div>
+    <div class="overlay"></div>
+    <div class="body-wrap">
+      <div class="accent-bar"></div>
+      <h2 data-fit data-fit-lines="2" data-fit-min="72">What the <em>field</em><br/>actually looks like.</h2>
+      <p>Six weeks shadowing the people who use this every day â not the demo, not the press release. Hereâs the part of the story that doesnât show up in any dashboard.</p>
+    </div>
+  </section>
+
+  <!-- 13 SPLIT CONTRAST (BEFORE / AFTER) -->
+  <section class="slide splitcontrast" data-screen-label="13 Before / after">
+    <div class="pair">
+      <div class="side before">
+        <div class="tag">Before</div>
+        <h3>Decisions lived in <em>Slack</em>.</h3>
+        <ul>
+          <li>Asked again every two weeks because nobody could find the answer.</li>
+          <li>Three threads per question; no canonical version.</li>
+          <li>New joiners reverse-engineered context from emoji reactions.</li>
+        </ul>
+      </div>
+      <div class="side after">
+        <div class="tag">After</div>
+        <h3>Decisions live on the <em>brief</em>.</h3>
+        <ul>
+          <li>One page per decision â dated, owned, linked from the project.</li>
+          <li>Slack threads link to the brief; the brief never links back.</li>
+          <li>New joiners read the briefs and arrive caught up.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 EDITORIAL LIGHT -->
+  <section class="slide editorial-light" data-screen-label="14 Editorial">
+    <div class="body-wrap">
+      <div class="eyebrow">Chapter Â· 03 Â· The case</div>
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">What the <em>numbers</em> didnât tell us.</h2>
+      <p class="lede">The metric went up and to the right for three quarters straight â and then we shipped the wrong thing anyway. <b>The number was honest; the story we built around it wasnât.</b> Hereâs what changed when we started reading the conversations behind the chart.</p>
+      <div class="sidebar">
+        <div class="pull">
+          <div class="mark">"</div>
+          <blockquote data-fit data-fit-lines="4" data-fit-min="22">The dashboard was the <em>last</em> place the answer was hiding.</blockquote>
+          <div class="who">A. Reviewer Â· March</div>
+        </div>
+        <div class="meta">
+          <div><span class="k">Period â</span> <span class="v">Jan â Mar 2026</span></div>
+          <div><span class="k">Sample â</span> <span class="v">142 closed items</span></div>
+          <div><span class="k">Outcome â</span> <span class="v accent">Brief rewritten</span></div>
+        </div>
+      </div>
+      <div class="footline">
+        <div>Field notes Â· internal</div>
+        <div>Read time <b>4 min</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15 STAT LIGHT -->
+  <section class="slide body stat light" data-screen-label="15 Stat (light)">
+    <div class="body-wrap">
+      <div class="kicker">By the <b>numbers</b> â measured against last cycle</div>
+      <div class="nums">
+        <div class="n">
+          <div class="big">2.4<em>Ã</em></div>
+          <div class="lbl">Faster median ship time across product surfaces.</div>
+        </div>
+        <div class="n">
+          <div class="big">68<em>%</em></div>
+          <div class="lbl">Of work now closed within the same week it opened.</div>
+        </div>
+        <div class="n">
+          <div class="big">11</div>
+          <div class="lbl">Net-new initiatives moved out of draft this quarter.</div>
+        </div>
+      </div>
+      <div class="note">Sample: 142 closed items Â· period Jan 04 â Mar 28 Â· excludes one-off ops tickets.</div>
+    </div>
+  </section>
+
+  <!-- 16 CARDS LIGHT -->
+  <section class="slide body cards light" data-screen-label="16 Cards (light)">
+    <div class="body-wrap">
+      <div class="head">
+        <h2>Four <em>directions</em><br/>weâre investing in.</h2>
+        <p>Each pillar has an owner, a measurable outcome, and a one-page brief.</p>
+      </div>
+      <div class="grid">
+        <div class="card" style="background: var(--c1);">
+          <div class="num">01</div>
+          <div>
+            <h3>Foundations</h3>
+            <p>Pay down debt in the parts of the system we touch every week.</p>
+          </div>
+        </div>
+        <div class="card" style="background: var(--c2);">
+          <div class="num">02</div>
+          <div>
+            <h3>Velocity</h3>
+            <p>Cut the loop time between idea and shipped surface in half.</p>
+          </div>
+        </div>
+        <div class="card" style="background: var(--c3);">
+          <div class="num">03</div>
+          <div>
+            <h3>Quality</h3>
+            <p>Raise the floor â boring, reliable, predictable in the dull bits.</p>
+          </div>
+        </div>
+        <div class="card" style="background: var(--c4);">
+          <div class="num">04</div>
+          <div>
+            <h3>Reach</h3>
+            <p>Get the work in front of the people it was built to serve.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17 STEPS LIGHT -->
+  <section class="slide body steps light" data-screen-label="17 Steps (light)">
+    <div class="body-wrap">
+      <h2>From idea to <em>shipped</em>,<br/>in four steps.</h2>
+      <div class="track">
+        <div class="step">
+          <div class="num">1</div>
+          <h3>Brief</h3>
+          <p>One page. End-state, scope, owners, and the date we plan to be done.</p>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <h3>Build</h3>
+          <p>Smallest possible thing that proves the idea, in front of real people.</p>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <h3>Review</h3>
+          <p>Written first, meeting second. Decisions go on the brief, not into Slack.</p>
+        </div>
+        <div class="step current">
+          <div class="num">4</div>
+          <h3>Ship &amp; learn</h3>
+          <p>Roll it out. Watch the metric that mattered. Write down what you learned.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18 THREE COLUMNS LIGHT -->
+  <section class="slide body threecol light" data-screen-label="18 Three cols (light)">
+    <div class="body-wrap">
+      <h2>Three <em>bets</em> for the next six months.</h2>
+      <div class="grid">
+        <div class="col">
+          <div class="tag">Bet Â· 01</div>
+          <h3>Foundations</h3>
+          <p>Pay down debt in the parts of the system we touch every week.</p>
+          <ul>
+            <li>Replace the legacy router</li>
+            <li>One auth path, one session model</li>
+            <li>Migrate the three slowest endpoints</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="tag">Bet Â· 02</div>
+          <h3>Velocity</h3>
+          <p>Cut the loop time between idea and shipped surface in half.</p>
+          <ul>
+            <li>Preview deploys on every branch</li>
+            <li>Async review by default</li>
+            <li>Briefs published before code is opened</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="tag">Bet Â· 03</div>
+          <h3>Reach</h3>
+          <p>Get the work in front of the people it was built to serve.</p>
+          <ul>
+            <li>Onboarding rewrite</li>
+            <li>Empty-state passes</li>
+            <li>First-week email sequence</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19 KEY POINTS LIGHT -->
+  <section class="slide body keypoints light" data-screen-label="19 Key points (light)">
+    <div class="body-wrap">
+      <div class="head">
+        <h2>Three <em>principles</em><br/>we hold to.</h2>
+        <p>Internal guardrails. Read them, argue with them, then live by them.</p>
+      </div>
+      <div class="list">
+        <div class="pt"><div class="ix">PÂ·01</div><div><h3 class="ttl">Write before you build</h3><p class="body">A one-page brief beats a three-hour meeting, every time. No exceptions.</p></div></div>
+        <div class="pt"><div class="ix">PÂ·02</div><div><h3 class="ttl">Default to async</h3><p class="body">If a decision is worth keeping, itâs worth writing down where everyone can find it later.</p></div></div>
+        <div class="pt"><div class="ix">PÂ·03</div><div><h3 class="ttl">Measure what hurts</h3><p class="body">Pick the metric that would make you change behavior. Ignore the rest of the dashboard.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20 TOC -->
+  <section class="slide body toc" data-screen-label="20 TOC">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Table of <em>contents</em>.</h2>
+      <div class="toc-grid">
+        <div class="toc-row"><div class="n">01</div><div class="t">Where we are</div></div>
+        <div class="toc-row"><div class="n">05</div><div class="t">Trade-offs</div></div>
+        <div class="toc-row"><div class="n">02</div><div class="t">What changed</div></div>
+        <div class="toc-row"><div class="n">06</div><div class="t">Risks &amp; mitigations</div></div>
+        <div class="toc-row"><div class="n">03</div><div class="t">The proposal</div></div>
+        <div class="toc-row"><div class="n">07</div><div class="t">Owners &amp; dates</div></div>
+        <div class="toc-row"><div class="n">04</div><div class="t">Why it matters now</div></div>
+        <div class="toc-row"><div class="n">08</div><div class="t">Next steps</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21 TWO CONTENTS IN A SLIDE -->
+  <section class="slide body twocontents" data-screen-label="21 Two contents">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Two parallel <em>tracks</em>.</h2>
+      <div class="pair">
+        <div class="block">
+          <h3>Track A Â· Foundations</h3>
+          <ul>
+            <li>Pay down debt in the parts we touch every week.</li>
+            <li>Replace the legacy router with the new one.</li>
+            <li>Standardise the auth + session model end-to-end.</li>
+            <li>Migrate the three slowest endpoints first.</li>
+          </ul>
+        </div>
+        <div class="block">
+          <h3>Track B Â· Reach</h3>
+          <ul>
+            <li>Get the work in front of the people it serves.</li>
+            <li>Rewrite onboarding from scratch this quarter.</li>
+            <li>Empty-state passes on every primary surface.</li>
+            <li>First-week email sequence, six touchpoints.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22 TWO COLS BULLETS -->
+  <section class="slide body twocols" data-screen-label="22 Two cols bullets">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">What weâve <em>learned</em> so far.</h2>
+      <div class="grid">
+        <ul>
+          <li>Briefs published before the build cut review time in half.</li>
+          <li>Async writing surfaces disagreements earlier than meetings.</li>
+          <li>One owner per initiative is the only ratio that works.</li>
+          <li>Empty-state quality is a leading indicator for retention.</li>
+        </ul>
+        <ul>
+          <li>The dashboard is the last place the answer is hiding.</li>
+          <li>Two-week increments outperform four-week sprints.</li>
+          <li>Preview deploys per branch removed an entire QA cycle.</li>
+          <li>The boring slides ship the unboring features.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 23 NUMBERED CONCLUSIONS -->
+  <section class="slide body numconcl" data-screen-label="23 Numbered conclusions">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Four <em>takeaways</em>.</h2>
+      <div class="list">
+        <div class="row">
+          <div class="n">01</div>
+          <div>
+            <h3 class="t">Write before you build.</h3>
+            <p class="b">A one-page brief beats a three-hour meeting. Every time. No exceptions.</p>
+          </div>
+        </div>
+        <div class="row">
+          <div class="n">02</div>
+          <div>
+            <h3 class="t">Default to async.</h3>
+            <p class="b">If a decision is worth keeping, write it where everyone can find it next quarter.</p>
+          </div>
+        </div>
+        <div class="row">
+          <div class="n">03</div>
+          <div>
+            <h3 class="t">Ship the boring bits first.</h3>
+            <p class="b">The seventh sprint of the same release is the one that wins or loses you the year.</p>
+          </div>
+        </div>
+        <div class="row">
+          <div class="n">04</div>
+          <div>
+            <h3 class="t">Measure what hurts.</h3>
+            <p class="b">Pick the metric that would change behaviour. Ignore the rest of the dashboard.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 24 COMPARISON TABLE -->
+  <section class="slide body cmptable" data-screen-label="24 Comparison table">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Three approaches, <em>compared</em>.</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Approach</th>
+              <th>Ship time</th>
+              <th>Owner load</th>
+              <th>Reversible?</th>
+              <th>Best for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Patch</td>
+              <td>1â2 days</td>
+              <td>Low</td>
+              <td>Yes</td>
+              <td>Known regressions</td>
+            </tr>
+            <tr>
+              <td>Refactor</td>
+              <td>2â3 weeks</td>
+              <td>Medium</td>
+              <td>Mostly</td>
+              <td>Tech debt in hot paths</td>
+            </tr>
+            <tr>
+              <td>Rewrite</td>
+              <td>2â3 quarters</td>
+              <td>High</td>
+              <td>No</td>
+              <td>Foundational shifts only</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="caption">Sample data Â· internal benchmarks Q4 2025 â Q1 2026</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 25 FORMULA -->
+  <section class="slide body formula" data-screen-label="25 Formula">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">The <em>tradeoff</em> we keep running into.</h2>
+      <div class="eq-wrap">
+        <div class="eq" data-fit data-fit-min="32">Cost<sub>total</sub> = <span class="accent">Î±</span> Â· Time + <span class="accent">Î²</span> Â· Quality<sup>2</sup> + Î³ Â· Scope</div>
+      </div>
+      <ul>
+        <li><b>Î±, Î², Î³</b> are project-level constants set in the brief.</li>
+        <li>Quality is squared because cleanup cost grows non-linearly.</li>
+        <li>If Î± = 1, youâre optimising for speed; if Î² = 1, for quality.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 26 RESEARCH QUESTION -->
+  <section class="slide body rquestion" data-screen-label="26 Research question">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">Research <em>question</em>.</h2>
+      <div class="main-rq">
+        <div class="lbl">Main RQ</div>
+        <div class="q">How does asynchronous review change the rate at which teams ship reversible decisions â across team size and project complexity?</div>
+      </div>
+      <div class="subs">
+        <div class="sub">
+          <div class="lbl">Sub-Q 01</div>
+          <p class="q">Does written-first reduce time-to-first-decision compared to meeting-first?</p>
+        </div>
+        <div class="sub">
+          <div class="lbl">Sub-Q 02</div>
+          <p class="q">How does the effect change with team size (3â12 people)?</p>
+        </div>
+        <div class="sub">
+          <div class="lbl">Sub-Q 03</div>
+          <p class="q">Whatâs the failure mode when async review is used for irreversible decisions?</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 27 GRID 2x2 -->
+  <section class="slide body grid2x2" data-screen-label="27 Grid 2x2">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Four <em>quadrants</em> of the problem.</h2>
+      <div class="cells">
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>High-leverage, fast</h3>
+          <p>Patches and small migrations. Do these on Mondays, ship by Thursday.</p>
+        </div>
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>High-leverage, slow</h3>
+          <p>Foundational shifts that change every adjacent decision for a year afterwards.</p>
+        </div>
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>Low-leverage, fast</h3>
+          <p>Nice-to-haves and polish work. Useful for filler weeks; not the main act.</p>
+        </div>
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>Low-leverage, slow</h3>
+          <p>The trap. If you find yourself here, write a one-page brief explaining why â or stop.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 28 PRICING CARDS -->
+  <section class="slide body pricing" data-screen-label="28 Pricing cards">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Three plans, one <em>commitment</em>.</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="name">Starter</div>
+          <div class="price">$9<small>/ month</small></div>
+          <ul>
+            <li>One workspace, three editors</li>
+            <li>10 GB asset storage</li>
+            <li>Community support</li>
+            <li>Standard templates</li>
+          </ul>
+        </div>
+        <div class="card featured">
+          <div class="badge">Popular</div>
+          <div class="name">Team</div>
+          <div class="price">$29<small>/ month</small></div>
+          <ul>
+            <li>Unlimited workspaces</li>
+            <li>100 GB asset storage</li>
+            <li>Priority email support</li>
+            <li>Advanced templates + SSO</li>
+            <li>Brand controls &amp; export</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="name">Studio</div>
+          <div class="price">$79<small>/ month</small></div>
+          <ul>
+            <li>Everything in Team</li>
+            <li>1 TB asset storage</li>
+            <li>Dedicated success manager</li>
+            <li>Custom integrations</li>
+            <li>Audit logs &amp; compliance</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 29 CONCLUSION CARDS WITH TIMELINE -->
+  <section class="slide body conclcards" data-screen-label="29 Conclusion cards">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Four moments that <em>moved</em> the work.</h2>
+      <div class="timeline">
+        <div class="timeline-line"></div>
+        <div class="timeline-dots">
+          <div><div class="dot" style="--card-color: var(--c1);"></div></div>
+          <div><div class="dot" style="--card-color: var(--c2);"></div></div>
+          <div><div class="dot" style="--card-color: var(--c3);"></div></div>
+          <div><div class="dot" style="--card-color: var(--c4);"></div></div>
+        </div>
+      </div>
+      <div class="cards">
+        <div class="card" style="background: var(--c1);">
+          <div class="num">01</div>
+          <h3>The brief</h3>
+          <p>Written first; argued in writing before a meeting was scheduled.</p>
+        </div>
+        <div class="card" style="background: var(--c2);">
+          <div class="num">02</div>
+          <h3>The build</h3>
+          <p>Smallest possible thing, in front of real users in the first two weeks.</p>
+        </div>
+        <div class="card" style="background: var(--c3);">
+          <div class="num">03</div>
+          <h3>The fork</h3>
+          <p>Two prototypes shipped; one won on the metric we agreed mattered.</p>
+        </div>
+        <div class="card" style="background: var(--c4);">
+          <div class="num">04</div>
+          <h3>The roll</h3>
+          <p>Rolled out gradually. Watched the leading indicator, not the lagging one.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 30 AGENDA LIGHT -->
+  <section class="slide body agenda light" data-screen-label="30 Agenda (light)">
+    <div class="body-wrap">
+      <div class="lhs">
+        <h2 data-fit data-fit-lines="2" data-fit-min="64">What we'll <em>cover</em>.</h2>
+        <p>Five short sections. Read in order, or jump to what you need â every page is self-contained.</p>
+      </div>
+      <ol>
+        <li><span class="ttl">Where we are</span><span class="dur">8 min</span></li>
+        <li><span class="ttl">What changed</span><span class="dur">12 min</span></li>
+        <li><span class="ttl">The proposal</span><span class="dur">15 min</span></li>
+        <li><span class="ttl">Trade-offs</span><span class="dur">10 min</span></li>
+        <li><span class="ttl">Next steps</span><span class="dur">5 min</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 31 QUOTE LIGHT -->
+  <section class="slide body quote light" data-screen-label="31 Quote (light)">
+    <div class="body-wrap">
+      <div class="mark">"</div>
+      <blockquote data-fit data-fit-lines="3" data-fit-min="48">The work is to keep the <em>important</em> things easy, and let the rest stay difficult.</blockquote>
+      <div class="who"><span><b>A. Reviewer</b> Â· internal review Â· April</span></div>
+    </div>
+  </section>
+
+  <!-- 32 COMPARE LIGHT -->
+  <section class="slide body compare light" data-screen-label="32 Trade-offs (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">What we're <em>choosing</em><br/>and what we're letting go.</h2>
+      <div class="cols">
+        <div class="col">
+          <div class="tag">Yes</div>
+          <h3>We will</h3>
+          <ul>
+            <li>Ship fewer, larger things to fewer, better-served users.</li>
+            <li>Cut review meetings in half and put the time into making.</li>
+            <li>Publish the brief before the build, every time.</li>
+            <li>Default to async writing for any decision worth keeping.</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="tag">No</div>
+          <h3>We won't</h3>
+          <ul>
+            <li>Chase every adjacent surface area "while we're in there".</li>
+            <li>Open work without a written, dated end-state in mind.</li>
+            <li>Run a meeting that could be a paragraph and a poll.</li>
+            <li>Confuse busy with productive on the weekly review.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 33 IMAGE LEFT LIGHT -->
+  <section class="slide body imgleft light" data-screen-label="33 Image + bullets (light)">
+    <div class="body-wrap">
+      <figure>
+        <div class="img-slot">
+          <div class="label">Image</div>
+        </div>
+        <figcaption><b>Figure 1.</b> Internal case Â· 9-day implementation, 4-cohort rollout.</figcaption>
+      </figure>
+      <div class="rhs">
+        <h2 data-fit data-fit-lines="3" data-fit-min="48">A small <em>change</em>, measured carefully.</h2>
+        <ul>
+          <li>Shipped on a Tuesday. Pulled the dashboard the same week.</li>
+          <li>Lift held across three of four cohorts â the fourth was a known outlier.</li>
+          <li>Cost: one engineer for nine days. No new infra.</li>
+          <li>Now standard on every new surface that touches the same flow.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 34 TWO CONTENTS LIGHT -->
+  <section class="slide body twocontents light" data-screen-label="34 Two contents (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Two parallel <em>tracks</em>.</h2>
+      <div class="pair">
+        <div class="block">
+          <h3>Track A Â· Foundations</h3>
+          <ul>
+            <li>Pay down debt in the parts we touch every week.</li>
+            <li>Replace the legacy router with the new one.</li>
+            <li>Standardise the auth + session model end-to-end.</li>
+            <li>Migrate the three slowest endpoints first.</li>
+          </ul>
+        </div>
+        <div class="block">
+          <h3>Track B Â· Reach</h3>
+          <ul>
+            <li>Get the work in front of the people it serves.</li>
+            <li>Rewrite onboarding from scratch this quarter.</li>
+            <li>Empty-state passes on every primary surface.</li>
+            <li>First-week email sequence, six touchpoints.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 35 NUMBERED CONCLUSIONS LIGHT -->
+  <section class="slide body numconcl light" data-screen-label="35 Numbered conclusions (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Four <em>takeaways</em>.</h2>
+      <div class="list">
+        <div class="row">
+          <div class="n">01</div>
+          <div>
+            <h3 class="t">Write before you build.</h3>
+            <p class="b">A one-page brief beats a three-hour meeting. Every time. No exceptions.</p>
+          </div>
+        </div>
+        <div class="row">
+          <div class="n">02</div>
+          <div>
+            <h3 class="t">Default to async.</h3>
+            <p class="b">If a decision is worth keeping, write it where everyone can find it next quarter.</p>
+          </div>
+        </div>
+        <div class="row">
+          <div class="n">03</div>
+          <div>
+            <h3 class="t">Ship the boring bits first.</h3>
+            <p class="b">The seventh sprint of the same release is the one that wins or loses you the year.</p>
+          </div>
+        </div>
+        <div class="row">
+          <div class="n">04</div>
+          <div>
+            <h3 class="t">Measure what hurts.</h3>
+            <p class="b">Pick the metric that would change behaviour. Ignore the rest of the dashboard.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 36 COMPARISON TABLE LIGHT -->
+  <section class="slide body cmptable light" data-screen-label="36 Table (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Three approaches, <em>compared</em>.</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Approach</th>
+              <th>Ship time</th>
+              <th>Owner load</th>
+              <th>Reversible?</th>
+              <th>Best for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Patch</td>
+              <td>1â2 days</td>
+              <td>Low</td>
+              <td>Yes</td>
+              <td>Known regressions</td>
+            </tr>
+            <tr>
+              <td>Refactor</td>
+              <td>2â3 weeks</td>
+              <td>Medium</td>
+              <td>Mostly</td>
+              <td>Tech debt in hot paths</td>
+            </tr>
+            <tr>
+              <td>Rewrite</td>
+              <td>2â3 quarters</td>
+              <td>High</td>
+              <td>No</td>
+              <td>Foundational shifts only</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="caption">Sample data Â· internal benchmarks Q4 2025 â Q1 2026</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 37 FORMULA LIGHT -->
+  <section class="slide body formula light" data-screen-label="37 Formula (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">The <em>tradeoff</em> we keep running into.</h2>
+      <div class="eq-wrap">
+        <div class="eq" data-fit data-fit-min="32">Cost<sub>total</sub> = <span class="accent">Î±</span> Â· Time + <span class="accent">Î²</span> Â· Quality<sup>2</sup> + Î³ Â· Scope</div>
+      </div>
+      <ul>
+        <li><b>Î±, Î², Î³</b> are project-level constants set in the brief.</li>
+        <li>Quality is squared because cleanup cost grows non-linearly.</li>
+        <li>If Î± = 1, youâre optimising for speed; if Î² = 1, for quality.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 38 RESEARCH QUESTION LIGHT -->
+  <section class="slide body rquestion light" data-screen-label="38 Research question (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">Research <em>question</em>.</h2>
+      <div class="main-rq">
+        <div class="lbl">Main RQ</div>
+        <div class="q">How does asynchronous review change the rate at which teams ship reversible decisions â across team size and project complexity?</div>
+      </div>
+      <div class="subs">
+        <div class="sub">
+          <div class="lbl">Sub-Q 01</div>
+          <p class="q">Does written-first reduce time-to-first-decision compared to meeting-first?</p>
+        </div>
+        <div class="sub">
+          <div class="lbl">Sub-Q 02</div>
+          <p class="q">How does the effect change with team size (3â12 people)?</p>
+        </div>
+        <div class="sub">
+          <div class="lbl">Sub-Q 03</div>
+          <p class="q">Whatâs the failure mode when async review is used for irreversible decisions?</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 39 GRID 2x2 LIGHT -->
+  <section class="slide body grid2x2 light" data-screen-label="39 Grid 2x2 (light)">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="56">Four <em>quadrants</em> of the problem.</h2>
+      <div class="cells">
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>High-leverage, fast</h3>
+          <p>Patches and small migrations. Do these on Mondays, ship by Thursday.</p>
+        </div>
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>High-leverage, slow</h3>
+          <p>Foundational shifts that change every adjacent decision for a year afterwards.</p>
+        </div>
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>Low-leverage, fast</h3>
+          <p>Nice-to-haves and polish work. Useful for filler weeks; not the main act.</p>
+        </div>
+        <div class="cell">
+          <div class="dash"></div>
+          <h3>Low-leverage, slow</h3>
+          <p>The trap. Write a one-page brief explaining why â or stop.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 40 IMAGE RIGHT -->
+  <section class="slide body imgright" data-screen-label="40 Image right">
+    <div class="body-wrap">
+      <div class="lhs">
+        <h2 data-fit data-fit-lines="3" data-fit-min="48">The system, <em>illustrated</em>.</h2>
+        <ul>
+          <li>Title on the left, diagram on the right â our default for any "how it works" slide.</li>
+          <li>Image scales via <b>object-fit: contain</b>, so it never distorts.</li>
+          <li>Drop in a screenshot or schematic; everything else adapts.</li>
+        </ul>
+      </div>
+      <figure>
+        <div class="img-slot">
+          <div class="label">Image Â· right</div>
+        </div>
+        <figcaption><b>Figure 2.</b> System overview Â· v3 architecture sketch.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 41 IMAGE ABOVE -->
+  <section class="slide body imgabove" data-screen-label="41 Image above">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">Above-the-fold <em>diagram</em>.</h2>
+      <figure>
+        <div class="img-slot">
+          <div class="label">Image Â· above</div>
+        </div>
+        <figcaption><b>Figure 3.</b> The headline visual Â· scales to fit the column it lives in.</figcaption>
+      </figure>
+      <ul>
+        <li>Image takes most of the slide; bullets sit as a footer band.</li>
+        <li>Best when the visual is the headline and bullets are caption-like.</li>
+        <li>Bullets wrap horizontally; max 3â4 short lines.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 42 IMAGE BELOW -->
+  <section class="slide body imgbelow" data-screen-label="42 Image below">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">Setup first, <em>diagram</em> after.</h2>
+      <ul>
+        <li>Read the bullets, then look at the diagram.</li>
+        <li>Best when the text frames how to read the visual.</li>
+        <li>Same horizontal bullet pattern as image-above.</li>
+      </ul>
+      <figure>
+        <div class="img-slot">
+          <div class="label">Image Â· below</div>
+        </div>
+        <figcaption><b>Figure 4.</b> Anchor visual Â· sits after the framing copy.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 43 TWO IMAGE RIGHT -->
+  <section class="slide body twoimgright" data-screen-label="43 Two images right">
+    <div class="body-wrap">
+      <div class="lhs">
+        <h2 data-fit data-fit-lines="3" data-fit-min="48">Two views, <em>compared</em>.</h2>
+        <ul>
+          <li>Two stacked images on the right â before / after or two angles of the same thing.</li>
+          <li>Each image scales independently in its half of the column.</li>
+          <li>Captions can sit beneath each image in the Python layout.</li>
+        </ul>
+      </div>
+      <div class="imgs">
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 01</div></div>
+          <figcaption><b>5a.</b> Before Â· baseline state</figcaption>
+        </figure>
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 02</div></div>
+          <figcaption><b>5b.</b> After Â· post-intervention</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 44 TWO IMAGE LEFT -->
+  <section class="slide body twoimgleft" data-screen-label="44 Two images left">
+    <div class="body-wrap">
+      <div class="imgs">
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 01</div></div>
+          <figcaption><b>6a.</b> View from the user side</figcaption>
+        </figure>
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 02</div></div>
+          <figcaption><b>6b.</b> Same flow, our side</figcaption>
+        </figure>
+      </div>
+      <div class="rhs">
+        <h2 data-fit data-fit-lines="3" data-fit-min="48">Two views, <em>walked through</em>.</h2>
+        <ul>
+          <li>Mirror of the previous layout â images left, narrative right.</li>
+          <li>Use this when reading order is image â explanation.</li>
+          <li>Bullets here describe what to look for in each image.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 45 TWO IMAGE ABOVE -->
+  <section class="slide body twoimgabove" data-screen-label="45 Two images above">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">Side-by-side <em>diagrams</em>.</h2>
+      <div class="imgs">
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 01</div></div>
+          <figcaption><b>7a.</b> Expected Â· what the model predicts</figcaption>
+        </figure>
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 02</div></div>
+          <figcaption><b>7b.</b> Observed Â· what we measured in March</figcaption>
+        </figure>
+      </div>
+      <ul>
+        <li>Two equal-width images stretched across the top half.</li>
+        <li>Bullets sit beneath as a shared caption band.</li>
+        <li>Best for paired comparisons of the same type of thing.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 46 TWO IMAGE BELOW -->
+  <section class="slide body twoimgbelow" data-screen-label="46 Two images below">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="2" data-fit-min="48">Setup, then the <em>evidence</em>.</h2>
+      <ul>
+        <li>Read the framing first, then compare the two images below.</li>
+        <li>Same paired-image grid as image-above, just lower in the layout.</li>
+        <li>Useful for "hereâs what we expected vs. observed".</li>
+      </ul>
+      <div class="imgs">
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 01</div></div>
+          <figcaption><b>8a.</b> First angle</figcaption>
+        </figure>
+        <figure>
+          <div class="img-slot"><div class="label">Image Â· 02</div></div>
+          <figcaption><b>8b.</b> Second angle</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 47 END -->
+  <section class="slide end" data-screen-label="47 End">
+    <div class="body-wrap">
+      <h2 data-fit data-fit-lines="1" data-fit-min="140">Thank <em>you</em>.</h2>
+      <div class="end-foot">
+        <div class="item">
+          <div class="k">Presented by</div>
+          <div class="v">Slidev Team</div>
+        </div>
+        <div class="item">
+          <div class="k">Date</div>
+          <div class="v">19 / 05 / 2026</div>
+        </div>
+        <div class="item">
+          <div class="k">Q&amp;A Session</div>
+          <div class="v"><em>Open discussion</em></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</deck-stage>
+
+<!-- =========================================================
+     TWEAKS PANEL
+     ========================================================= -->
+<div class="tw-panel" id="twPanel">
+  <div class="tw-head">
+    <div class="title">Tweaks</div>
+    <button class="x" id="twClose" aria-label="Close">Ã</button>
+  </div>
+  <div class="tw-label">Theme Â· palette</div>
+  <div class="tw-themes" id="twThemes"></div>
+  <div class="tw-note">Switches <b>cover_bg</b>, <b>end_bg</b>, <b>accent</b>, <b>4Ã card</b> tokens live. Keyboard: <b>â / â</b> for slides.</div>
+</div>
+
+<script>
+/* =========================================================
+   THEME DATA (mirrors the Python theme dict)
+   ========================================================= */
+const THEMES = {
+  'frankfurt':    {cover_bg: 'linear-gradient(135deg, #0f172a 0%, #172554 46%, #1d4ed8 100%)', end_bg: 'radial-gradient(circle at top, #1e3a8a 0%, #0f172a 72%)',  accent: '#e2b96f', text: '#f8fafc', dim: 'rgba(248, 250, 252, 0.55)', cards: ['#5b9bd5','#e07b6a','#7b68c8','#f0a050'], panel: 'dark',  font: {display: "'Montserrat', system-ui, sans-serif",   body: "'Open Sans', system-ui, sans-serif",   mono: "'IBM Plex Mono', monospace"}},
+  'umn':          {cover_bg: 'linear-gradient(135deg, #7a0019 0%, #500014 55%, #330009 100%)', end_bg: 'radial-gradient(circle at top, #7a0019 0%, #330009 72%)',   accent: '#ffcc33', text: '#ffffff', dim: 'rgba(255, 255, 255, 0.55)', cards: ['#900021','#2c6fad','#2a7a6f','#b8860b'], panel: 'dark',  font: {display: "'Playfair Display', Georgia, serif",   body: "'Source Sans 3', system-ui, sans-serif", mono: "'IBM Plex Mono', monospace"}},
+  'seriph':       {cover_bg: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', end_bg: 'radial-gradient(circle at top, #16213e 0%, #0a0a1a 72%)',  accent: '#e94560', text: '#f8fafc', dim: 'rgba(248, 250, 252, 0.55)', cards: ['#c0415e','#4a6fa5','#7a5c8a','#5a8a5a'], panel: 'light', font: {display: "'Cormorant Garamond', Georgia, serif", body: "'Work Sans', system-ui, sans-serif",    mono: "'JetBrains Mono', monospace"}},
+  'scholarly':    {cover_bg: 'linear-gradient(135deg, #1e2a3a 0%, #2d3e50 50%, #3a5068 100%)', end_bg: 'radial-gradient(circle at top, #2d3e50 0%, #0f1a25 72%)',  accent: '#f0a500', text: '#f0f0f0', dim: 'rgba(240, 240, 240, 0.55)', cards: ['#3a7abf','#bf5a3a','#5a7a3a','#7a5abf'], panel: 'dark',  font: {display: "'Lora', Georgia, serif",               body: "'IBM Plex Sans', system-ui, sans-serif",mono: "'IBM Plex Mono', monospace"}},
+  'improving-25': {cover_bg: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)', end_bg: 'radial-gradient(circle at top, #302b63 0%, #0f0c29 72%)',  accent: '#a855f7', text: '#f8fafc', dim: 'rgba(248, 250, 252, 0.55)', cards: ['#9333ea','#06b6d4','#f59e0b','#10b981'], panel: 'light', font: {display: "'Crimson Pro', Georgia, serif",      body: "'Space Grotesk', system-ui, sans-serif",mono: "'Space Mono', monospace"}},
+  'meetup':       {cover_bg: 'linear-gradient(135deg, #1a5276 0%, #1b4f72 50%, #1a252f 100%)', end_bg: 'radial-gradient(circle at top, #1a5276 0%, #1a252f 72%)',  accent: '#5dade2', text: '#f8fafc', dim: 'rgba(248, 250, 252, 0.55)', cards: ['#2980b9','#e57373','#5a9a5a','#f0a050'], panel: 'light', font: {display: "'Newsreader', Georgia, serif",        body: "'DM Sans', system-ui, sans-serif",      mono: "'JetBrains Mono', monospace"}},
+  'bricks':       {cover_bg: 'linear-gradient(135deg, #c0392b 0%, #a93226 50%, #922b21 100%)', end_bg: 'radial-gradient(circle at top, #c0392b 0%, #6e2016 72%)',  accent: '#f1c40f', text: '#ffffff', dim: 'rgba(255, 255, 255, 0.6)',  cards: ['#c0392b','#d4891a','#8a4a2f','#6a7a8a'], panel: 'dark',  font: {display: "'Spectral', Georgia, serif",           body: "'Archivo', system-ui, sans-serif",     mono: "'IBM Plex Mono', monospace"}},
+};
+
+/* =========================================================
+   TWEAKS â persisted via EDITMODE block
+   ========================================================= */
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "frankfurt"
+}/*EDITMODE-END*/;
+
+let state = { ...TWEAK_DEFAULTS };
+
+function applyTheme(key) {
+  const t = THEMES[key];
+  if (!t) return;
+  const stage = document.querySelector('deck-stage');
+  if (!stage) return;
+  stage.style.setProperty('--cover-bg', t.cover_bg);
+  stage.style.setProperty('--end-bg', t.end_bg);
+  stage.style.setProperty('--accent', t.accent);
+  stage.style.setProperty('--text', t.text);
+  stage.style.setProperty('--dim', t.dim);
+  stage.style.setProperty('--c1', t.cards[0]);
+  stage.style.setProperty('--c2', t.cards[1]);
+  stage.style.setProperty('--c3', t.cards[2]);
+  stage.style.setProperty('--c4', t.cards[3]);
+  stage.style.setProperty('--panel-text', t.panel === 'dark' ? '#0b0d12' : '#ffffff');
+  // Fonts
+  stage.style.setProperty('--font-display', t.font.display);
+  stage.style.setProperty('--font-body', t.font.body);
+  stage.style.setProperty('--font-mono', t.font.mono);
+  // Special-case: italic accent on display heading. Both improving-25 (Space Grotesk display)
+  // and bricks (Spectral) read fine in italic too; drop the special-case entirely.
+  stage.style.setProperty('--display-italic', 'italic');
+  // update tweak button active state
+  document.querySelectorAll('#twThemes button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.key === key);
+  });
+}
+
+/* =========================================================
+   BUILD TWEAKS PANEL
+   ========================================================= */
+const twWrap = document.getElementById('twThemes');
+Object.entries(THEMES).forEach(([key, t]) => {
+  const btn = document.createElement('button');
+  btn.dataset.key = key;
+  const displayName = t.font.display.split(',')[0].replace(/'/g, '');
+  btn.innerHTML = `<span class="sw" style="background:${t.cover_bg};"></span><span class="col"><span class="nm">${key}</span><span class="fn" style="font-family:${t.font.display};">${displayName}</span></span>`;
+  btn.addEventListener('click', () => {
+    state.theme = key;
+    applyTheme(key);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { theme: key } }, '*');
+  });
+  twWrap.appendChild(btn);
+});
+
+/* =========================================================
+   EDIT MODE PROTOCOL
+   ========================================================= */
+const panel = document.getElementById('twPanel');
+const closeBtn = document.getElementById('twClose');
+
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || !d.type) return;
+  if (d.type === '__activate_edit_mode') panel.classList.add('show');
+  else if (d.type === '__deactivate_edit_mode') panel.classList.remove('show');
+});
+closeBtn.addEventListener('click', () => {
+  panel.classList.remove('show');
+  window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
+});
+
+/* =========================================================
+   AUTO-FIT â shrink [data-fit] elements to a target line count
+   Usage: <h2 data-fit data-fit-lines="2" data-fit-min="64">...</h2>
+   ========================================================= */
+function autoFitElement(el) {
+  el.style.fontSize = '';
+  const maxLines = parseInt(el.dataset.fitLines || '0', 10);  // 0 = unlimited
+  let size = parseFloat(getComputedStyle(el).fontSize);
+  const min = parseFloat(el.dataset.fitMin || (size * 0.5));
+  const step = Math.max(2, size * 0.04);
+  function overflows() {
+    // Width overflow (always checked) â equation/title-on-one-line use case
+    if (el.scrollWidth > el.clientWidth + 1) return true;
+    // Line count overflow â only if data-fit-lines set
+    if (maxLines > 0) {
+      const lh = parseFloat(getComputedStyle(el).lineHeight);
+      if (isFinite(lh) && lh > 0) {
+        if (Math.round(el.offsetHeight / lh) > maxLines) return true;
+      }
+    }
+    return false;
+  }
+  let guard = 60;
+  while (size > min && overflows() && guard-- > 0) {
+    size -= step;
+    el.style.fontSize = size + 'px';
+  }
+}
+function autoFitAll() {
+  document.querySelectorAll('.slide [data-fit]').forEach(autoFitElement);
+}
+
+/* Run on load, on font-ready, on slide change, on resize */
+requestAnimationFrame(autoFitAll);
+window.addEventListener('load', () => requestAnimationFrame(autoFitAll));
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => requestAnimationFrame(autoFitAll));
+}
+window.addEventListener('resize', () => requestAnimationFrame(autoFitAll));
+/* Re-fit whenever deck-stage flips the active slide */
+const _ds = document.querySelector('deck-stage');
+if (_ds) {
+  _ds.addEventListener('slidechange', () => requestAnimationFrame(autoFitAll));
+  /* Also observe data-deck-active flips on children as a fallback */
+  new MutationObserver(() => requestAnimationFrame(autoFitAll))
+    .observe(_ds, { attributes: true, subtree: true, attributeFilter: ['data-deck-active'] });
+}
+
+/* Apply default theme on load, then announce availability */
+applyTheme(state.theme);
+window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+</script>
+
+<!-- Speaker notes (one per slide, empty by default) -->
+<script type="application/json" id="speaker-notes">
+["","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","",""]
+</script>
+
+</body>
+</html>

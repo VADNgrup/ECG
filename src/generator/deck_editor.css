@@ -1,0 +1,290 @@
+
+/* ===== SLIDE EDITOR — PPT-like ribbon ===== */
+
+
+/* Material Symbols configuration */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal; font-style: normal;
+  display: inline-block; line-height: 1; text-transform: none;
+  letter-spacing: normal; word-wrap: normal; white-space: nowrap;
+  direction: ltr; -webkit-font-smoothing: antialiased;
+}
+
+/* ── Header (2-row ribbon container) ── */
+#ed-header {
+  position:fixed; top:0; left:0; right:0; background:#F3F2F1;
+  display:flex; flex-direction:column; z-index:999999;
+  border-bottom:1px solid #D2CECE; font-family:'Segoe UI', system-ui, sans-serif;
+  color:#201F1E; transition: transform 0.2s ease;
+  display:none; /* hidden by default */
+}
+#ed-header.active {
+  display:flex;
+}
+#ed-header.ed-fullscreen-hide {
+  transform: translateY(-100%);
+}
+#ed-tabbar {
+  display:flex; gap:2px; background:#E1DFDD; padding:2px 8px 0; border-bottom:1px solid #C8C6C4; align-items:center;
+}
+.ed-tab {
+  background:transparent; border:none; color:#444; padding:6px 16px; font-size:13px; cursor:pointer;
+  border-top-left-radius:4px; border-top-right-radius:4px; margin-bottom:-1px;
+}
+.ed-tab:hover { background:#F3F2F1; }
+.ed-tab.active { background:#F3F2F1; color:#201F1E; border-bottom: 2px solid #C43E1C; }
+
+#ed-ribbon {
+  background:#F3F2F1; padding:4px 8px; display:flex; gap:8px; align-items:flex-start; min-height:88px; overflow-x:auto;
+}
+.ed-ribbon-group {
+  display:flex; flex-direction:column; align-items:center; position:relative;
+  padding:0 8px;
+}
+.ed-ribbon-group::after {
+  content:''; position:absolute; right:0; top:4px; bottom:20px; width:1px; background:#C8C6C4;
+}
+.ed-ribbon-group:last-child::after { display:none; }
+.ed-group-title {
+  font-size:10px; color:#605E5C; margin-top:auto; padding-top:6px; margin-bottom:2px;
+}
+.ed-group-content {
+  display:flex; gap:2px; flex-wrap:wrap; justify-content:center;
+}
+.ed-group-content-col {
+  display:flex; flex-direction:column; gap:2px;
+}
+
+.ed-btn, .ed-btn-big {
+  background:transparent; border:1px solid transparent; color:#201F1E; cursor:pointer;
+  border-radius:4px; display:flex; align-items:center; justify-content:center; transition:background 0.1s;
+}
+.ed-btn { padding:4px; min-width:24px; height:24px; }
+.ed-btn-big { flex-direction:column; padding:4px 8px; height:54px; min-width:54px; font-size:11px; }
+.ed-btn-big .material-symbols-outlined { font-size:24px; color:#201F1E; font-weight:300; margin-bottom:2px; }
+.ed-btn:hover, .ed-btn-big:hover { background:rgba(0,0,0,0.08); border-color:#C8C6C4; }
+.ed-btn.active { background:rgba(0,0,0,0.1); border-color:#A19F9D; }
+.ed-btn .material-symbols-outlined { font-size:16px; color:#201F1E; }
+
+/* Controls */
+.ed-select {
+  background:#FFFFFF; border:1px solid #C8C6C4; color:#201F1E; padding:2px 4px; border-radius:2px; font-size:12px; height:22px; outline:none;
+}
+.ed-input {
+  background:#FFFFFF; border:1px solid #C8C6C4; color:#201F1E; padding:2px 4px; border-radius:2px; font-size:12px; width:40px; height:22px; text-align:center;
+}
+
+/* Color Picker */
+.ed-color-picker {
+  position:absolute; background:#FFFFFF; border:1px solid #C8C6C4; box-shadow:0 4px 12px rgba(0,0,0,0.15);
+  padding:12px; z-index:1000000; border-radius:4px; color:#201F1E; font-family:'Segoe UI', sans-serif;
+  display:none; width: 220px;
+}
+.ed-color-picker.active { display:block; }
+.ed-color-section { margin-bottom:8px; }
+.ed-color-title { font-size:11px; font-weight:600; margin-bottom:6px; color:#444; }
+.ed-color-grid { display:grid; grid-template-columns:repeat(10, 1fr); gap:1px; margin-bottom:2px; }
+.ed-color-swatch { width:18px; height:18px; border:1px solid rgba(255,255,255,0.1); cursor:pointer; }
+.ed-color-swatch:hover { border:1px solid #fff; transform:scale(1.1); z-index:2; position:relative; }
+.ed-color-spacer { height: 4px; }
+
+/* ── Left panels ── */
+#ed-slide-panel, #ed-outline-panel {
+  display:none; position:fixed; top:124px; left:0; bottom:0; width:220px;
+  z-index:99998; overflow-y:auto; background:#F5F4F3;
+  border-right:1px solid #D2CECE; font:12px 'Segoe UI', system-ui,sans-serif;
+}
+#ed-slide-panel.active, #ed-outline-panel.active { display:block; }
+
+.ed-si {
+  padding:12px; cursor:grab; border-bottom:1px solid #E1DFDD;
+  color:#555; font-size:12px; transition:background 0.1s; display:flex; align-items:center; gap:8px;
+}
+.ed-si:hover { background:#EDEBE9; color:#201F1E; }
+.ed-si.ed-active { background:#E8E5E3; color:#201F1E; border-left:3px solid #C43E1C; padding-left:9px; }
+.ed-si.ed-drag-over { border-top:2px solid #C43E1C; }
+.ed-si .material-symbols-outlined { font-size:16px; color:#888; }
+
+.ed-oi { padding:8px 12px; cursor:pointer; border-bottom:1px solid #E1DFDD; color:#555; font-size:11px; }
+.ed-oi:hover { background:#EDEBE9; color:#201F1E; }
+.ed-oi.active { background:#E8E5E3; color:#201F1E; }
+
+/* Selection overlay */
+#ed-sel-box {
+  display:none; position:fixed; z-index:99996;
+  border:1px dashed #777; pointer-events:none; cursor:move;
+}
+#ed-sel-box.show { display:block; }
+.ed-rh {
+  position:absolute; width:8px; height:8px; background:#fff; border:1px solid #555; border-radius:50%;
+  pointer-events:all; z-index:1; box-sizing:border-box; box-shadow:0 1px 2px rgba(0,0,0,0.2);
+}
+.ed-rh-nw { top:-4px; left:-4px; cursor:nw-resize; }
+.ed-rh-n  { top:-4px; left:calc(50% - 4px); cursor:n-resize; }
+.ed-rh-ne { top:-4px; right:-4px; cursor:ne-resize; }
+.ed-rh-e  { top:calc(50% - 4px); right:-4px; cursor:e-resize; }
+.ed-rh-se { bottom:-4px; right:-4px; cursor:se-resize; }
+.ed-rh-s  { bottom:-4px; left:calc(50% - 4px); cursor:s-resize; }
+.ed-rh-sw { bottom:-4px; left:-4px; cursor:sw-resize; }
+.ed-rh-w  { top:calc(50% - 4px); left:-4px; cursor:w-resize; }
+
+#ed-group-box {
+  display:none; position:fixed; z-index:99995; border:1px dashed rgba(255,255,255,0.4); background:rgba(255,255,255,0.05); pointer-events:none;
+}
+#ed-group-box.show { display:block; }
+
+/* Cues */
+[data-editing] img { cursor:pointer !important; }
+[data-editing] img:hover { outline:2px dashed #888 !important; outline-offset:2px; }
+[contenteditable]:focus { outline:2px solid #555 !important; outline-offset:2px; border-radius:2px; }
+[data-mode=select] [contenteditable]:hover { outline:none !important; cursor:default; }
+[data-editing] td, [data-editing] th { border:1px solid rgba(255,255,255,0.2) !important; padding:4px 8px !important; min-width:60px; }
+
+/* Mode cursors */
+[data-mode=select] deck-stage { cursor:default; }
+[data-mode=text] deck-stage { cursor:text; }
+[data-mode=draw] deck-stage { cursor:crosshair; }
+
+.ed-textbox {
+  position:absolute; min-width:120px; min-height:60px; color:var(--text,#fff); z-index:500;
+  padding:10px 14px; border:1px dashed rgba(255,255,255,0.3); border-radius:4px; font-size:52px; line-height:1.3;
+  cursor:move; word-wrap:break-word; overflow-wrap:break-word; white-space:pre-wrap; overflow:hidden;
+}
+.ed-textbox:focus { border-color:#888; outline:none; cursor:text; border-style:solid; }
+
+/* Slide-transition (tr-*) and object-animation (anim-*) keyframes now live in
+ * _deck_css.css so they play at runtime (present) even without the editor.
+ * See _deck_css.css → "Slide transitions" / "Per-object entrance animations". */
+
+/* Editable Lists — custom ::before handles bullets, so disable browser list markers */
+[contenteditable] ul, .ed-textbox ul { list-style-type: none; padding-left: 24px; margin-left: 0; }
+[contenteditable] ol, .ed-textbox ol { list-style-type: decimal; padding-left: 24px; margin-left: 0; }
+[contenteditable] li, .ed-textbox li { display: list-item; margin-bottom: 4px; }
+
+/* ── Slide frame indicator (16:9 boundary in edit mode) ── */
+#ed-slide-frame {
+  position: fixed;
+  pointer-events: none;
+  z-index: 95;
+  display: none;
+  box-shadow: 0 0 0 1.5px rgba(196, 62, 28, 0.5);
+  outline: 1px solid rgba(196, 62, 28, 0.25);
+}
+
+/* ── Thumbnails ── */
+.ed-thumb {
+  padding:10px; border-bottom:1px solid #E1DFDD; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center;
+}
+.ed-thumb:hover { background:#EDEBE9; }
+.ed-thumb.active { background:#E0DEDD; border-left:3px solid #C43E1C; }
+.ed-thumb-num {
+  font-size:11px; color:#888; align-self:flex-start; margin-bottom:4px;
+}
+.ed-thumb-cnt {
+  width:160px; height:90px; background:#fff; position:relative;
+  overflow:hidden; border:1px solid #444; border-radius:4px;
+  transform-origin:0 0;
+}
+
+.ed-thumb-cnt section.slide {
+  transform: scale(0.08333); /* 160/1920 */
+  transform-origin: 0 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ── Context tabs ── */
+.ed-ctx-tab.active { outline: 2px solid rgba(255,255,255,0.65); outline-offset: -2px; }
+.ed-ctx-tab:hover { opacity: 0.82; }
+
+/* Table style option checkboxes */
+.ed-chk {
+  display:flex; align-items:center; gap:4px;
+  font-size:10px; color:#444; cursor:pointer; padding:1px 0; white-space:nowrap;
+}
+.ed-chk input[type=checkbox] { margin:0; cursor:pointer; accent-color:#70AD47; }
+
+/* Table quick style swatches */
+.ed-tbl-style-swatch {
+  width:36px; height:26px; cursor:pointer; border-radius:2px;
+  border:2px solid #C8C6C4;
+}
+.ed-tbl-style-swatch:hover { border-color:#2B579A; transform:scale(1.05); }
+
+/* Table class-based banding */
+table.tbl-banded tbody tr:nth-child(even) td { background:rgba(255,255,255,0.08); }
+table.tbl-total tbody tr:last-child td { border-top:2px solid currentColor; font-weight:600; }
+table.tbl-firstcol tbody td:first-child { font-weight:600; }
+table.tbl-lastcol tbody td:last-child { font-weight:600; }
+
+/* ── Active button highlight ── */
+.active-btn {
+  background: rgba(196,62,28,0.12) !important;
+  border-color: #c43e1c !important;
+}
+
+/* ── Ribbon collapsed ── */
+#ed-ribbon.collapsed {
+  display: none;
+}
+#ed-collapse-ribbon.collapsed {
+  transform: rotate(180deg);
+}
+
+/* ── Ed shapes ── */
+.ed-shape {
+  cursor: move;
+}
+.ed-shape svg {
+  pointer-events: none;
+}
+
+/* ── Ed group ── */
+.ed-group {
+  cursor: move;
+}
+
+/* ── Alignment snap guides ── */
+.ed-guide {
+  position: absolute;
+  background: #e83e8c;
+  pointer-events: none;
+  opacity: 0.85;
+  z-index: 9999;
+}
+.ed-guide-h {
+  height: 1px;
+  left: 0; right: 0;
+}
+.ed-guide-v {
+  width: 1px;
+  top: 0; bottom: 0;
+}
+
+/* ── Rubber-band selection ── */
+#ed-rubber-band {
+  display: none;
+  border: 1.5px solid #1264a3;
+  background: rgba(18, 100, 163, 0.08);
+  pointer-events: none;
+  z-index: 400;
+}
+
+/* ── Chrome elements: always hittable in edit mode (children too) ── */
+[data-editing] .chrome-top,
+[data-editing] .chrome-bot {
+  pointer-events: all !important;
+  cursor: pointer;
+}
+[data-editing] .chrome-top *,
+[data-editing] .chrome-bot * { pointer-events: all !important; }
+
+/* ── Gray stage background in edit mode ── */
+body[data-editing] { background: #525659; }

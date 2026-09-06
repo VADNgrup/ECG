@@ -1,0 +1,45 @@
+[{
+    "theme": "frankfurt",
+    "font": "STIX Two Text",
+    "serve": "Best for formal university lectures, academic courses, and educational modules. Features a structured sidebar navigation with section progress bar — ideal when the presentation has multiple clearly defined chapters or sections and needs a traditional academic look."
+},
+{
+    "theme": "umn",
+    "font": "STIX Two Text",
+    "serve": "Best for university or research presentations that need vibrant, colorful branding (e.g. department seminars, research group meetings, campus events). Suitable when the content is academic but the audience expects an energetic, visually engaging style — not purely formal."
+},
+{
+    "theme": "seriph",
+    "font": "Roboto",
+    "serve": "Best for minimalist, clean general-purpose presentations where the content should speak for itself. Ideal for business reports, product overviews, or any topic requiring a distraction-free, elegant look with no heavy branding."
+},
+{
+    "theme": "bricks",
+    "font": "Roboto",
+    "serve": "Best for visual, playful educational content aimed at children or teenagers (primary, middle, and high school). Features bold colors and a fun layout — NOT suitable for university-level, professional, or scientific audiences."
+},
+{
+    "theme": "scholarly",
+    "font": "Roboto",
+    "serve": "Best for highly formal academic writing presented as slides: scientific papers, thesis defenses, journal articles, technical standards, and official reports. Prioritizes readability of dense text and structured argumentation over visual flair."
+},
+{
+    "theme": "meetup",
+    "font": "Roboto",
+    "serve": "Best for community events, workshops, club activities, informal meetups, and non-academic gatherings. Features a casual, approachable style — NOT intended for formal education, university lectures, or professional/scientific contexts."
+},
+{
+    "theme": "improving-25",
+    "font": "Roboto",
+    "serve": "Best for modern, startup-style or tech presentations where visual impact and brand identity matter: product launches, pitch decks, tech conferences, and innovation showcases. Features bold typography and bright contemporary colors — not suitable for traditional academic or formal report settings."
+},
+{
+    "theme": "ivory",
+    "font": "Cormorant Garamond",
+    "serve": "Best for elegant, print-inspired presentations with a light cream background on all body slides. Ideal for humanities, liberal arts, literature, history, or any topic where a warm, readable, paper-like aesthetic suits the audience."
+},
+{
+    "theme": "sage",
+    "font": "Lora",
+    "serve": "Best for calm, nature-inspired or environmental presentations with a soft sage-green light background on all body slides. Suitable for biology, ecology, sustainability, health sciences, or any topic where a fresh, earthy feel is appropriate."
+}]

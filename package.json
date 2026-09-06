@@ -1,0 +1,21 @@
+{
+  "name": "masg",
+  "version": "1.0.0",
+  "description": "MASG: Efficient Multi-Agent Slide Generation using Compact Language Models",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "multi-agent",
+    "presentation-generation",
+    "llm",
+    "slidegen"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}

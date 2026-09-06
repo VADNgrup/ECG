@@ -1,0 +1,55 @@
+[{
+    "theme": "frankfurt",
+    "font":"STIX Two Text",
+    "serve": "For university education lecture/document, scientific paper and technical report"
+},
+{
+    "theme": "umn",
+    "font":"STIX Two Text",
+    "serve": "For university education lecture/document, technical report, and scientific paper but with colorful colors"
+},
+{
+    "theme": "seriph",
+    "font":"Roboto",
+    "serve": "For general presentation"
+},
+{
+    "theme": "default",
+    "font":"Roboto",
+    "serve": "For general presentation, very simple and clean"
+},
+{
+    "theme": "bricks",
+    "font":"Roboto",
+    "serve": "For general education, for primary/secondary/high school students, not for university lecture"
+},
+{
+    "theme": "scholarly",
+    "font":"Roboto",
+    "serve": "For university education lecture/document, technical report, and scientific paper but with very formal design"
+},
+{
+    "theme": "meetup",
+    "font":"Roboto",
+    "serve": "For general education, for primary/secondary/high school students, not for university lecture"
+},
+{
+    "theme": "gemini",
+    "font":"Roboto",
+    "serve": "For technical report and presentation but more interactive effect"
+},
+{
+    "theme": "improving-25",
+    "font":"Roboto",
+    "serve": "For general presentation, very modern and bright color"
+},
+{
+    "theme": "foamscience",
+    "font":"Roboto",
+    "serve": "For general presentation, very simple"
+},
+{
+    "theme": "nord",
+    "font":"Roboto",
+    "serve": "For general presentation, very very simple"
+}]
