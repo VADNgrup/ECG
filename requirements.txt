@@ -1,0 +1,52 @@
+# NOTE: requires Python 3.12 (minirag / mineru / torch do NOT support Python 3.14).
+# The KG backend is the VENDORED MiniRAG (./MiniRAG) — see the RAG section below + MiniRAG/VENDOR.md.
+# Fresh env:  conda create -n slide python=3.12 && conda activate slide && pip install -r requirements.txt
+# GPU (MinerU on CUDA):  pip install torch --index-url https://download.pytorch.org/whl/cu121
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+httpx>=0.24.0
+openai>=1.0.0,<2.0.0
+json-repair>=0.30.0
+tqdm>=4.65.0
+langgraph>=0.0.40
+PyMuPDF>=1.23.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+Pillow>=11.0.0        # MinerU 3.x requires pillow>=11
+matplotlib>=3.7.0
+numpy>=1.24.0
+jinja2>=3.0.0
+rapidfuzz>=3.0.0
+torch>=2.0.0
+open-clip-torch>=2.20.0
+sentence-transformers>=2.2.0,<6.0.0
+rouge-chinese==1.0.3
+jieba==0.42.1
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# --- Knowledge-Graph / RAG subsystem (src/rag/) ---
+# The KG backend is MiniRAG (HKUDS), VENDORED into ./MiniRAG and installed EDITABLE so we can edit its
+# source (see MiniRAG/VENDOR.md). PyPI minirag-hku is broken (won't import) -> use the vendored copy.
+# The structural KG (heading nodes + contains/mentions) is added by a repo-owned POST-BUILD networkx
+# pass (src/rag/structural.add_structure_to_graph + build_kg.build), NOT a framework monkeypatch, so it
+# is framework-version-independent.
+-e ./MiniRAG        # vendored editable package; its pyproject currently omits runtime dependencies
+tiktoken>=0.7.0
+nano-vectordb>=0.0.4.3
+pipmaster>=0.4.0
+nltk>=3.9           # MiniRAG imports nltk.metrics.edit_distance
+mineru>=2.0.0       # PDF parser (marker parser removed — MinerU + OCR remain)
+# MinerU 3.x needs transformers <5.0 (v5 removed transformers.pytorch_utils.find_pruneable_heads_and_indices,
+# which MinerU's models import). marker-pdf/surya-ocr (now removed, Track P) forced transformers>=5.12 and
+# BROKE MinerU with `cannot import name 'find_pruneable_heads_and_indices'`. sentence-transformers is fine
+# on 4.57.x. -> pin < 5.0 and uninstall marker-pdf + surya-ocr.
+transformers>=4.57.3,<5.0.0
+networkx>=3.0
+pyvis>=0.3.2
+# REMOVED: lightrag-hku, raganything (fully replaced by the vendored MiniRAG — build_kg uses
+#   minirag.llm.openai + minirag.utils.EmbeddingFunc; structural KG is a repo post-build pass) and
+#   marker-pdf (Track P — the marker parser + src/rag/marker_adapter.py were deleted).
+#   NOTE: src/rag/patches/deploy_webui.py (the OPTIONAL LightRAG web UI deployer) is now dead and needs
+#   lightrag if ever used — not part of the slide pipeline.

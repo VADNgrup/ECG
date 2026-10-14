@@ -1,0 +1,19 @@
+{
+  "name": "lecslidegen3",
+  "version": "1.0.0",
+  "description": "LecSlideGen is an automated experimental pipeline designed to convert raw academic documents into structured, presentation-ready Slidev decks. The system utilizes a parallel Multi-Agent LLM architecture with built-in reflection and refinement mechanisms to ensure structural integrity and high content faithfulness to the source material.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}

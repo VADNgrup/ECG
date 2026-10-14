@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ### AL ###
 #Template for AL projects for Dynamics 365 Business Central
 #launch.json folder
@@ -21,3 +22,60 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+=======
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+build/
+dist/
+.Python
+env/
+venv/
+ENV/
+.venv
+.claude/
+# secrets and local settings
+.env
+.vscode/
+.claude/settings.local.json
+.claude/skills/
+CLAUDE.md
+
+# OS / Office
+.DS_Store
+~$*
+*.pending.pptx
+
+# node (deck renderer dependencies)
+node_modules/
+
+.pytest_cache/
+.pytest_*/
+.test_runs/
+.coverage
+htmlcov/
+tests/pytest_*/
+tests/codex_tmp/
+tests/
+# pipeline data: only the source PDFs in data/raw/ are kept
+data/raw/_trimmed/
+data/assets/*
+data/context/*
+data/lectures/*
+data/tmp/
+# every rebuildable cache (KB graphs, page-parse output, agent decisions): data/cache/{kb,parse,decisions}
+data/cache/
+!data/lectures/.gitkeep
+# internal working docs: real but not meant for the public repo
+docs/ARCHITECTURE.md
+docs/LAYOUT_RULES.md
+docs/METHOD.md
+docs/METHOD_PAPER.md
+# outputs and logs
+output/*
+!output/.gitkeep
+logs/*
+>>>>>>> 167ce8d (Initial commit)
