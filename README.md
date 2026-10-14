@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Summary of Educational Content Generation methods published by members in the VADNgrup (Updating)
 
 This repository contains code for research projects on Educational Content Generation.
@@ -20,16 +19,6 @@ We construct this repo into multiple branches for difference projects including:
   [code+data](https://github.com/VADNgrup/ECG/tree/2026-masg)
 =======
 # LecSlideGen: Automated Lecture Generation Pipeline
-
-LecSlideGen converts a PDF into an editable, source-grounded PowerPoint deck (native `.pptx`).
-
-Every document first becomes a knowledge graph (heading tree, heading-owned text, concepts, figures with their own
-captions). Four agents then build the lecture chapter by chapter: the **Lecture Planner** divides each chapter into
-complete slides, the **Packet Builder** decides what each slide's evidence carries, the **Slide Writer** writes each
-slide and picks a layout that grows to hold it, and **Content QA** checks every bullet against the sentences it cites
-and fills or drops thin slides. Every bullet cites the book's own sentences. The full architecture is in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
 ## System Overview
 
 <p align="center">
@@ -118,4 +107,3 @@ python run_benchmark.py
 # 2. Summarize runtime and quality metrics (automatically filters by model)
 python summarize_performance.py --log logs/llm_calls_gpt-4.1-mini.jsonl
 ```
->>>>>>> 167ce8d (Initial commit)
