@@ -6,19 +6,27 @@ own `filter_sentences`).
 """
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional
 
 from src.rag.idea_candidates import scope_sentences
+from src.rag.retrieve_content import filter_sentences, sentence_units
 from src.utils import lang
 from src.workflow.scope import ScopeOrchestrator
+
+
+_FENCES = re.compile(r"^\s*```[^\n]*\n|\n?\s*```\s*$")
 
 
 class Chapter:
     """Paragraphs (source units) of one chapter in reading order, with short IDs `P1..`."""
 
-    def __init__(self, root_id: int, title: str, heading_ids: List[int], by_heading: dict):
+    def __init__(self, root_id: int, title: str, heading_ids: List[int], by_heading: dict,
+                 heading_titles: Optional[Dict[int, str]] = None):
         self.id, self.title = root_id, title
         self.heading_ids = list(heading_ids)
+        self.heading_titles = dict(heading_titles or {})
+        self.language = ""                       # named by the pipeline from the chapter's text
         self.paragraphs: List[dict] = []
         self.sentences: Dict[str, dict] = {}
         self.pid_of: Dict[str, str] = {}
@@ -95,6 +103,29 @@ class Chapter:
         text = " ".join(self.sentences[s]["text"] for s in self.by_pid[pid]["sentences"])
         return text if limit is None or len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " …"
 
+    def size(self, pid: str) -> int:
+        """How much text a paragraph holds (`lang.source_size`)."""
+        return lang.source_size(self.text_of(pid))
+
+    def read_as_text(self, pid: str) -> bool:
+        """A fenced block that is no listing becomes a text paragraph, sentence by sentence; False when none is left."""
+        paragraph = self.by_pid[pid]
+        first = self.sentences[paragraph["sentences"][0]]
+        raw = first["ref"]["quote"]
+        body = _FENCES.sub("", raw).strip("\n")
+        start = first["ref"]["start"] + raw.find(body)
+        unit = {"id": paragraph["unit_id"], "text": body, "kind": "text",
+                "source_ref": {**first["ref"], "start": start, "end": start + len(body), "quote": body}}
+        rows, _ = filter_sentences(sentence_units([unit]), self.heading_titles.get(paragraph["heading"], ""))
+        if not rows:
+            return False
+        for s in paragraph["sentences"]:
+            self.sentences.pop(s, None)
+            self.pid_of.pop(s, None)
+        paragraph.update(kind="text", sentences=[r["id"] for r in rows])
+        self._index(rows, pid, paragraph["heading"])
+        return True
+
     def following_assets(self, pid: str) -> List[str]:
         """Formula / table / code paragraphs right after a prose paragraph: they usually illustrate it."""
         out, k = [], int(pid[1:])
@@ -110,5 +141,6 @@ def load_chapters(kb_dir, index: dict, roots: List[int], visible) -> List[Chapte
     for root in roots:
         ordered = orchestrator.ordered_scope([root], visible)
         by_heading = scope_sentences(kb_dir, index, set(ordered))
-        out.append(Chapter(root, orchestrator.title(root), ordered, by_heading))
+        out.append(Chapter(root, orchestrator.title(root), ordered, by_heading,
+                           {h: orchestrator.title(h) for h in ordered}))
     return out

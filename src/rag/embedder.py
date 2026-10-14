@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set
 
 import numpy as np
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from src.utils.config import Config
+from src.utils.llm import stop_if_out_of_credit
 
 HASH_DIM = 512
 MAX_PARTS = 24
@@ -155,9 +156,14 @@ class Embedder:
     def _remote(self, texts: Sequence[str]) -> List[np.ndarray]:
         if self._client is None:
             self._client = OpenAI(api_key=Config.EMBED_API_KEY, base_url=Config.EMBED_BASE_URL,
-                                  timeout=120.0, max_retries=5)
+                                  timeout=Config.EMBED_TIMEOUT_S, max_retries=Config.EMBED_MAX_RETRIES)
         batch = [t[:8000] or " " for t in texts]
-        resp = self._client.embeddings.create(model=self.model, input=batch)
+        try:
+            resp = self._client.embeddings.create(model=self.model, input=batch)
+        except RateLimitError as exc:              # an empty account stops the run; a rate limit is the caller's
+            body = exc.body if isinstance(exc.body, dict) else {}
+            stop_if_out_of_credit(body.get("error", body), exc)
+            raise
         self.calls += 1
         self.tokens_estimate += getattr(getattr(resp, "usage", None), "total_tokens", 0) or sum(len(t) // 3 for t in batch)
         return [np.asarray(d.embedding, dtype=np.float32) for d in resp.data]

@@ -15,6 +15,8 @@ from typing import Iterable, List, Optional, Sequence
 
 import regex as re
 
+from src.utils.config import Config
+
 _TERMINATORS = ".!?。！？؟…।։۔"
 _CJK_END = "。！？"
 _OPEN_OR_QUOTE = "\"'“‘«(["
@@ -73,6 +75,12 @@ def length_units(text: str) -> int:
     return units
 
 
+def source_size(text: str) -> int:
+    """How much text this is, in characters of a spaced script: slide and bullet budgets count this, so one text in two
+    languages weighs about the same."""
+    return len(text or "") + (Config.NO_SPACE_CHAR_SIZE - 1) * len(_NO_SPACE_SCRIPTS.findall(text or ""))
+
+
 def script_profile(text: str) -> dict:
     """Share of letters per script (top 3), e.g. {"Latin": 0.98}. Reporting/diagnostics only."""
     counts = Counter()
@@ -128,7 +136,7 @@ def learn_labels(lines: Sequence[str], min_count: int = 2) -> List[str]:
         m = _LEAD_LABEL.match(line or "")
         if m:
             counts[m.group(1).strip().rstrip(".").casefold()] += 1
-    return sorted(label for label, c in counts.items() if c >= min_count and len(label) <= 24)
+    return sorted(label for label, c in counts.items() if c >= min_count and len(label) <= Config.CAPTION_LABEL_MAX_CHARS)
 
 
 def labels_for_kb(kb_dir: Path, refresh: bool = False) -> List[str]:

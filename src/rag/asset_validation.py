@@ -1,8 +1,8 @@
 """Deterministic validation/normalisation for formula and table assets.
 
 The KG parser is deliberately permissive: PDF code listings are sometimes tagged as
-equations and wide table headers may be collapsed into one OCR cell.  Slide generation
-must not treat those parser labels as proof.  This module creates the small, cached
+equations and wide table headers may be collapsed into one OCR cell (such a table is reported invalid, never
+guessed).  Slide generation must not treat those parser labels as proof.  This module creates the small, cached
 ``ValidatedAsset`` contract consumed by both KG loading and the packet builder.
 """
 from __future__ import annotations
@@ -11,17 +11,16 @@ import math
 import re
 from typing import Iterable
 
+from src.utils.config import Config
 
-_CODE_WORDS = re.compile(r"(?:^|[_\W])(?:train|test|shuffle|dtype|import|from|predict|sklearn|numpy|np)(?=$|[_\W])", re.I)
-_CODE_SHAPE = re.compile(r"(?:\w+\s*=|\[[^\]]*:[^\]]*\]|\w+_\w+)")
-_SPACED_CODE_WORD = re.compile(r"(?:t\s+r\s+a\s+i\s+n|t\s+e\s+s\s+t)", re.I)
+
+# an unbraced '_' before 2+ letters is a program identifier: LaTeX subscripts one character unless braced
+_IDENTIFIER = re.compile(r"(?<![\\{])\b[A-Za-z]\w*_[A-Za-z]{2,}")
+_CODE_SHAPE = re.compile(r"(?:\w+\s*=|\[[^\]]*:[^\]]*\])")
+# slicing (x[:n], x[n:]) once glyph-level markup is flattened; mathematical notation has no such index
+_SLICE = re.compile(r"\w\[(?::\d|\d+:)")
 _LATEX_COMMAND = re.compile(r"\\(?:frac|sum|prod|sqrt|theta|alpha|beta|gamma|mathbf|boldsymbol|exp|log|nabla)\b")
 _SEP_ROW = re.compile(r"^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+\s*\|?\s*$")
-_KNOWN_HEADERS = (
-    "Algorithm", "Large m", "Out-of-core support", "Large n", "Hyperparams",
-    "Scaling required", "Scikit-Learn",
-)
-_SVM_HEADERS = ("Class", "Time complexity", "Out-of-core support", "Scaling required", "Kernel trick")
 
 
 def _balanced(text: str, left: str, right: str) -> bool:
@@ -46,18 +45,13 @@ def validate_formula(latex: str) -> dict:
     body = re.sub(r"^\s*\$\$|\$\$\s*$", "", raw).strip()
     plain = re.sub(r"\\[A-Za-z]+|[{}$]", " ", body)
     plain = re.sub(r"\s+", " ", plain).strip()
-    code_identifier = bool(_CODE_WORDS.search(plain) or _SPACED_CODE_WORD.search(body))
-    code_like = bool(code_identifier and _CODE_SHAPE.search(plain))
-    # MinerU's failed code-as-math OCR emits long runs of \mathsf single glyphs
-    # wrapped in nested arrays.  Genuine equations may use \mathsf, but not dozens
-    # of glyph-level commands together with train/test slicing tokens.
-    glyph_mathsf = len(re.findall(r"\\mathsf\s*\{\s*[A-Za-z]\s*\}", body))
-    if code_like or (glyph_mathsf >= 8 and code_identifier):
+    flat = re.sub(r"\\[A-Za-z]+|[{}\s]", "", body)          # a listing OCR'd glyph by glyph, read back
+    if (_IDENTIFIER.search(body) and _CODE_SHAPE.search(plain)) or _SLICE.search(flat):
         return {
             "original_type": "formula", "resolved_type": "code_block",
             "validation_status": "reclassified", "normalized_content": plain,
             "repair_source": "formula_code_heuristic",
-            "validation_reason": "OCR equation contains assignment/slicing and train/test identifiers",
+            "validation_reason": "OCR equation contains program identifiers or slicing",
             "valid": False,
         }
     if not body or not _balanced(body, "{", "}") or not _balanced(body, "(", ")"):
@@ -99,31 +93,6 @@ def _to_markdown(headers: list[str], rows: list[list[str]]) -> str:
             + "\n".join("| " + " | ".join(map(esc, row)) + " |" for row in rows))
 
 
-def _repair_known_collapsed_header(headers: list[str], rows: list[list[str]]) -> tuple[list[str], list[list[str]], bool]:
-    """Repair the common OCR shape where all seven Table 4-1 headers land in one cell.
-
-    The repair is evidence-preserving: every recovered label must occur verbatim in the
-    collapsed header and the row shift is allowed only for a trailing Fast/Slow value.
-    """
-    text = " ".join(h for h in headers if h).strip()
-    schema = next((candidate for candidate in (_KNOWN_HEADERS, _SVM_HEADERS)
-                   if len(headers) == len(candidate)
-                   and all(h.casefold() in text.casefold() for h in candidate)), None)
-    if schema is None:
-        return headers, rows, False
-    fixed_rows = []
-    for row in rows:
-        row = list(row) + [""] * (len(headers) - len(row))
-        if schema == _KNOWN_HEADERS:
-            match = re.match(r"^(.*\S)\s+(Fast|Slow)$", row[0], re.I)
-        else:
-            match = re.match(r"^(SGDClassifier)\s+(.+)$", row[0], re.I)
-        if match and not row[1]:
-            row[0], row[1] = match.group(1), match.group(2)
-        fixed_rows.append(row[:len(headers)])
-    return list(schema), fixed_rows, True
-
-
 def validate_table(markdown: str, caption: str = "") -> dict:
     lines = [line.strip() for line in str(markdown or "").splitlines() if line.strip()]
     data = [line for line in lines if not _SEP_ROW.match(line)]
@@ -138,22 +107,30 @@ def validate_table(markdown: str, caption: str = "") -> dict:
     width = max(len(row) for row in parsed)
     parsed = [row + [""] * (width - len(row)) for row in parsed]
     headers, rows = parsed[0], parsed[1:]
-    headers, rows, repaired = _repair_known_collapsed_header(headers, rows)
-    nonempty = sum(bool(h.strip()) for h in headers)
+    named = headers[1:]                          # a column of row labels often has no header of its own
+    nonempty = sum(bool(h.strip()) for h in named)
     consistent = all(len(row) == len(headers) for row in rows)
-    valid = bool(2 <= len(headers) <= 12 and rows and consistent and nonempty >= math.ceil(len(headers) * 0.75))
-    status = "repaired" if valid and repaired else "valid" if valid else "invalid"
-    reason = ("collapsed header reconstructed from its source labels" if repaired else
-              "consistent headers and rows" if valid else
-              "empty/collapsed headers or inconsistent column count")
+    filled = any(cell.strip() for row in rows for cell in row)    # a piece a chunk boundary cut holds no data
+    # a column with a header and no value: the reader shifted or lost it, and blanks would misstate the source
+    whole = all(any(row[i].strip() for row in rows) for i, h in enumerate(headers) if h.strip()) if rows else False
+    valid = bool(Config.TABLE_MIN_COLS <= len(headers) <= Config.TABLE_MAX_COLS and rows and consistent and filled
+                 and whole and nonempty >= math.ceil(len(named) * Config.TABLE_HEADER_FILLED_MIN))
+    status = "valid" if valid else "invalid"
+    reason = "consistent headers and rows" if valid else "empty/collapsed headers, a named column without values or inconsistent column count"
     normalized = _to_markdown(headers, rows) if valid else str(markdown or "")
     return {
         "original_type": "table", "resolved_type": "table", "validation_status": status,
         "normalized_content": normalized,
-        "repair_source": "deterministic_header_reconstruction" if repaired else "none",
+        "repair_source": "none",
         "validation_reason": reason, "valid": valid,
         "structured_table": {"headers": headers if valid else [], "rows": rows if valid else [], "caption": caption},
     }
+
+
+def holds_data(markdown: str) -> bool:
+    """A table unit with at least one filled cell under its header row, valid or not."""
+    rows = [_split_md_row(line) for line in str(markdown or "").splitlines() if line.strip() and not _SEP_ROW.match(line.strip())]
+    return any(cell.strip() for row in rows[1:] for cell in row)
 
 
 def validate_asset_record(row: dict) -> dict:

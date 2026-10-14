@@ -13,6 +13,7 @@ from rapidfuzz import fuzz
 
 from src.rag.kb_files import load_structural_index, load_text_chunks
 from src.rag.kg_schema import asset_node_fields, clean_type, is_asset_node, is_semantic_node, name_patterns
+from src.utils.config import Config
 
 TITLE_ID = -1
 HEAD_MARK = "⁣"
@@ -143,8 +144,8 @@ def _neighbor_looks_code(items: list[dict], i: int) -> bool:
     if j >= len(items):
         return False
     nb = items[j]
-    return bool(nb.get("type") == "text" and not nb.get("text_level")
-                and _looks_code(nb.get("text") or ""))
+    text = nb.get("text") or ""
+    return bool(nb.get("type") == "text" and not nb.get("text_level") and _looks_code(text) and not _looks_prose(text))
 
 
 _ROMAN_RE = re.compile(r"^(?=[ivxlcdm])m{0,4}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$")
@@ -216,6 +217,9 @@ def _families_nesting(
     return depth
 
 
+_SIBLING_MAX_WORDS = Config.HEADING_SIBLING_MAX_WORDS
+
+
 def _complete_siblings(items: list[dict], admitted: list[dict]) -> list[dict]:
     families = _numeric_families(admitted)
     if not families:
@@ -225,13 +229,59 @@ def _complete_siblings(items: list[dict], admitted: list[dict]) -> list[dict]:
         if i in have or it.get("type") != "text" or it.get("text_level"):
             continue
         t = re.sub(r"\s+", " ", it.get("text") or "").strip()
-        if not t or len(t.split()) > 8:
+        if not t or len(t.split()) > _SIBLING_MAX_WORDS:
             continue
         lead, has_num = _family_key(t)
         if has_num and lead in families:
             pg = it.get("page_idx", 0)
             admitted.append({"item_idx": i, "page": int(pg) if str(pg).isdigit() else 0,
                              "level": families[lead], "title": t})
+    admitted.sort(key=lambda x: x["item_idx"])
+    return admitted
+
+
+_ENUM_HEAD = re.compile(rf"^\s*([0-9]{{1,{Config.CAPTION_NUMBER_MAX_DIGITS}}}|[IVXLC]{{1,{Config.ROMAN_MAX_CHARS}}}|"
+                        rf"[ivxlc]{{1,{Config.ROMAN_MAX_CHARS}}})([.)])\s+\S")
+_ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+
+
+def _enum_value(token: str) -> int | None:
+    if token.isdigit():
+        return int(token)
+    vals = [_ROMAN[c] for c in token.lower()]
+    total = sum(-v if k + 1 < len(vals) and v < vals[k + 1] else v for k, v in enumerate(vals))
+    return total if _ROMAN_RE.match(token.lower()) else None
+
+
+def _enum_of(title: str) -> tuple | None:
+    """(numbering kind, number, closing mark, upper case) of a title opening with a number ("III. RESULTS")."""
+    m = _ENUM_HEAD.match(title)
+    if not m or _enum_value(m.group(1)) is None:
+        return None
+    kind = "arabic" if m.group(1).isdigit() else "roman"
+    return kind, _enum_value(m.group(1)), m.group(2), title.upper() == title
+
+
+def _complete_sequence(items: list[dict], admitted: list[dict]) -> list[dict]:
+    """A numbered heading's next numbers: a short line written the same way ("I. INTRODUCTION" -> "II. METHODOLOGY",
+    "III. RESULTS") after it is a heading at its level, though the reader gave it no heading style."""
+    have = {h["item_idx"] for h in admitted}
+    for h in sorted(admitted, key=lambda x: x["item_idx"]):
+        cur = _enum_of(h["title"])
+        if not cur:
+            continue
+        for i in range(h["item_idx"] + 1, len(items)):
+            it = items[i]
+            t = re.sub(r"\s+", " ", it.get("text") or "").strip() if it.get("type") == "text" else ""
+            nxt = _enum_of(t) if t and len(t.split()) <= _SIBLING_MAX_WORDS else None
+            if not nxt or (nxt[0], nxt[2], nxt[3]) != (cur[0], cur[2], cur[3]) or nxt[1] != cur[1] + 1:
+                continue
+            if i not in have:
+                pg = it.get("page_idx", 0)
+                admitted.append({"item_idx": i, "page": int(pg) if str(pg).isdigit() else 0,
+                                 "level": h["level"], "title": t})
+                have.add(i)
+            cur = nxt
     admitted.sort(key=lambda x: x["item_idx"])
     return admitted
 
@@ -300,7 +350,9 @@ def _complete_from_toc(items: list[dict], admitted: list[dict],
     return admitted
 
 
-def extract_headings(items: list[dict], toc_levels: dict[str, int] | None = None) -> list[dict]:
+def extract_headings(items: list[dict], toc_levels: dict[str, int] | None = None, front: bool = True) -> list[dict]:
+    """Headings of the items. `front`: the items start a PDF, whose first two pages (cover, title page) hold no
+    section heading; False for a document inside a collection, whose title is already its outline entry."""
     tocset = set(toc_levels or ())
     hs: list[dict] = []
     for i, it in enumerate(items):
@@ -315,7 +367,7 @@ def extract_headings(items: list[dict], toc_levels: dict[str, int] | None = None
                 continue
             pg = it.get("page_idx", 0)
             pg = int(pg) if str(pg).isdigit() else 0
-            if pg <= 1 and nt not in tocset:
+            if front and pg <= 1 and nt not in tocset:
                 continue
             if nt not in tocset and _is_typographic_noise(title):
                 continue
@@ -340,7 +392,7 @@ def extract_headings(items: list[dict], toc_levels: dict[str, int] | None = None
             continue
         out.append(h)
     out = _complete_from_toc(items, out, toc_levels)
-    return _complete_siblings(items, out)
+    return _complete_sequence(items, _complete_siblings(items, out))
 
 
 _MIN_OWN_WORDS = 15
@@ -434,9 +486,9 @@ def _prune_unmatched_leaves(nodes: list[dict], per_item: list[dict], items: list
     return _reattach_pruned(nodes, per_item, to_prune)
 
 
-def build_heading_tree(items: list[dict],
-                       toc_levels: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
-    headings = extract_headings(items, toc_levels)
+def build_heading_tree(items: list[dict], toc_levels: dict[str, int] | None = None,
+                       front: bool = True) -> tuple[list[dict], list[dict]]:
+    headings = extract_headings(items, toc_levels, front)
     hd_by_item = {h["item_idx"]: h for h in headings}
 
     nodes: list[dict] = []
@@ -653,9 +705,11 @@ def _nodes_to_index(nodes: list[dict], title: str) -> dict[str, Any]:
         pg0 = min(n["pages"]) if n["pages"] else n["start_page"]
 
         if parent in node_by_id and nn == norm_title(node_by_id[parent]["title"]):
+            # the parent's own title repeated inside it (a document's printed title): an alias under the parent, so
+            # what follows it stays in the parent's subtree; lists of sections show its children instead of it
             par = headings[parent]
             headings[n["id"]] = {"title": par["title"], "display": par["display"],
-                                 "level": par["level"], "parent": par["parent"],
+                                 "level": par["level"] + 1, "parent": parent, "alias": parent,
                                  "order": n["order"], "pages": sorted(n["pages"])}
             continue
 
@@ -801,7 +855,11 @@ def build_heading_tree_from_toc(items: list[dict], toc_entries: list[tuple[int, 
                                 page_offset: int = 0) -> tuple[list[dict], list[dict]]:
     """Nodes + per_item straight from the embedded outline, VERBATIM (level + order + page taken
     exactly from get_toc), minus pure-navigation entries. Same return shape as build_heading_tree so
-    downstream (marker prepend, structural_index, retrieval) is unchanged."""
+    downstream (marker prepend, structural_index, retrieval) is unchanged.
+
+    `toc_entries.detect_titles` (a collection of documents merged into one PDF): the text of a document that its own
+    outline does not cover (all of it when it has none) gets the headings the parser detects there, under its entry."""
+    detect = set(getattr(toc_entries, "detect_titles", ()) or ())
     # drop pure-navigation entries (cover / TOC / index / copyright / …) — no slide-worthy content
     toc_entries = [e for e in toc_entries if not _NAV_HEADING.match((e[1] or "").strip())]
     boundaries = _locate_toc_headings(items, toc_entries, page_offset)
@@ -825,7 +883,36 @@ def build_heading_tree_from_toc(items: list[dict], toc_entries: list[tuple[int, 
         if node >= 0:
             nodes[node]["pages"].add(pg)
         per_item.append({"node": node, "page": pg})
+    if detect:
+        nodes, per_item = _detect_inside(items, nodes, per_item, {i for i, n in enumerate(nodes) if n["title"] in detect})
     return nodes, per_item
+
+
+def _detect_inside(items: list[dict], nodes: list[dict], per_item: list[dict], under: set) -> tuple[list[dict], list[dict]]:
+    """The headings `build_heading_tree` detects in the items each outline node in `under` holds directly (not under
+    one of its own outline entries), nested below that node; every node's `order` follows the document."""
+    subs: dict[int, list[dict]] = {}
+    for i in sorted(under):
+        span = [j for j, s in enumerate(per_item) if s["node"] == i]
+        if not span:
+            continue
+        local, local_items = build_heading_tree([items[j] for j in span], front=False)
+        base = len(nodes) + sum(len(v) for v in subs.values())
+        ids = {n["id"]: base + k for k, n in enumerate(local)}
+        mine = []
+        for n in local:
+            mine.append({**n, "id": ids[n["id"]], "level": nodes[i]["level"] + int(n["level"]),
+                         "parent": i if n["parent"] == TITLE_ID else ids[n["parent"]], "pages": set(n["pages"])})
+        subs[i] = mine
+        for j, s in zip(span, local_items):
+            per_item[j] = {"node": ids.get(s["node"], i), "page": s["page"]}
+    order = []
+    for n in nodes:
+        order.append(n)
+        order += subs.get(n["id"], [])
+    for k, n in enumerate(order):
+        n["order"] = k
+    return nodes + [n for v in subs.values() for n in v], per_item
 
 
 def build_structural_index_from_toc(items: list[dict], title: str,

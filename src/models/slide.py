@@ -22,6 +22,10 @@ class Slide:
     goal: str
     slide_number: int = -99
     table: Optional[Table] = None
+    # the slide's other tables, each drawn on a page of its own after the slide
+    more_tables: List[Table] = field(default_factory=list)
+    # tables of its passages that cannot be drawn faithfully (a merged header): kept in the notes
+    tables_not_drawn: List[str] = field(default_factory=list)
     latex_block_formula: Optional[str] = None
     # every formula the slide draws, stacked in one box (the first is latex_block_formula)
     latex_formulas: List[str] = field(default_factory=list)

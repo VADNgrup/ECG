@@ -3,25 +3,28 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-import fitz
+import pymupdf
+import regex
 from tqdm import tqdm
 
 from src.rag.code_text import _MATH_FUNCS, _PROGRAM, _has_code_line, _word_ratio
 from src.rag.structural import _looks_prose
 from src.utils import lang
+from src.utils.config import Config
 from src.utils.llm import b64_image, vision_chat
 
 
 def _render_pages(pdf: Path, pages: tuple[int, int] | None, zoom: float = 2.0) -> list[tuple[int, bytes]]:
     out: list[tuple[int, bytes]] = []
-    with fitz.open(str(pdf)) as d:
+    with pymupdf.open(str(pdf)) as d:
         rng = range(pages[0], min(pages[1], d.page_count - 1) + 1) if pages else range(d.page_count)
         for i in rng:
-            pix = d[i].get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+            pix = d[i].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
             out.append((i, pix.tobytes("png")))
     return out
 
@@ -53,7 +56,7 @@ _CAPTION_RE = lang.caption_pattern([])
 
 
 def _style_candidates(page) -> list[dict]:
-    """Reads fitz's REAL font metadata (name + flags) per line -- not a visual guess -- to flag short,
+    """Reads PyMuPDF's REAL font metadata (name + flags) per line -- not a visual guess -- to flag short,
     standalone lines that are bold/italic. bbox/font survive even on PDFs with a broken ToUnicode map
     (verified against data/raw/nhagiakim.pdf, which has real mojibake diacritics but intact span fonts/
     bboxes -- glyph rendering and the ToUnicode text-decoding table are independent PDF structures).
@@ -108,19 +111,122 @@ def _style_hint(candidates: list[dict]) -> str:
     )
 
 
-def _ocr_cloud_page(png: bytes, hint: str = "") -> str:
+def _ocr_cloud_page(png: bytes, hint: str = "") -> Optional[str]:
+    """The page's markdown; None when the vision call failed (never cached, so the next run reads the page again)."""
     msg = [{"role": "user", "content": [{"type": "text", "text": _OCR_PROMPT + hint}, b64_image(png)]}]
     try:
         return vision_chat(msg, temperature=0.0, max_tokens=4096) or ""
     except Exception as e:
         tqdm.write(f"[ocr] cloud page failed: {str(e)[:80]}")
-        return ""
+        return None
+
+
+_WORD = regex.compile(r"\w+")
+_ZOOM = pymupdf.Matrix(2.0, 2.0)            # the pages are read at this scale (ocr_pdf)
+
+
+def _pairs(text: str) -> Counter:
+    """The text's consecutive word pairs (a lone word pairs with itself)."""
+    words = [w.casefold() for w in _WORD.findall(text or "")]
+    return Counter(zip(words, words[1:]) if len(words) > 1 else [(w, w) for w in words])
+
+
+def _layer_blocks(page) -> list[tuple]:
+    """The page's text-layer blocks as (rect, text, words), leaving out those mostly over a picture (its labels)."""
+    pictures = [r for img in page.get_images(full=True) for r in page.get_image_rects(img[0])]
+    out = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        rect = pymupdf.Rect(block["bbox"])
+        if any((p & rect).get_area() > Config.OCR_OVER_PICTURE_SHARE * rect.get_area() for p in pictures):
+            continue
+        text = " ".join("".join(s.get("text", "") for s in line.get("spans", [])) for line in block.get("lines", []))
+        if _WORD.search(text):
+            out.append((rect, text, len(_WORD.findall(text))))
+    return out
+
+
+def _held_blocks(page, md: str) -> Optional[list]:
+    """Rects of the text-layer blocks the page's transcription holds, when a sizeable block is missing from it (the
+    model skipped a column or the second of two facing pages); None when nothing sizeable is missing."""
+    have = _pairs(md)
+    held, missing = [], False
+    for rect, text, words in _layer_blocks(page):
+        pairs = _pairs(text)
+        share = sum((pairs & have).values()) / max(1, sum(pairs.values()))
+        if share >= Config.OCR_MISSING_PAIR_SHARE:
+            held.append(rect)
+        elif words >= Config.OCR_MISSING_BLOCK_MIN_WORDS:
+            missing = True
+    return held if missing else None
+
+
+def _masked_png(page, held: list) -> bytes:
+    """The page as read, with the text already transcribed and the pictures painted white: only the text-layer text
+    that was skipped stays to be read (a picture's own lettering is not the page's text)."""
+    pix = page.get_pixmap(matrix=_ZOOM)
+    pictures = [r for img in page.get_images(full=True) for r in page.get_image_rects(img[0])]
+    for rect in held + pictures:
+        pix.set_rect((rect * _ZOOM).irect & pix.irect, (255, 255, 255))
+    return pix.tobytes("png")
 
 
 _FENCE_OPEN = re.compile(r"^\s*(```|~~~)\s*([\w+#.-]*)\s*$")
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 _TABLE_RULE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
-_TABLE_CAPTION = re.compile(r"^\s*(?:\*{1,2}|_)?Table\s+\d+[-–.]\d+\s*[.:]", re.IGNORECASE)
+# words, numbers, sentence stops and markdown emphasis only: nothing a program line needs
+_PLAIN_LINE = re.compile(r"^\s*(?:[^\W_]|[\s.,:*'’])*$")
+_ANY_CAPTION = lang.caption_pattern([])     # without learned labels: a word, a dash/dot number, a stop ("Table 4-1.")
+_LABEL_LINE = re.compile(rf"^\s*[^\W\d_]{{{Config.CAPTION_LABEL_MIN_CHARS},{Config.CAPTION_LABEL_MAX_CHARS}}}\s*\.?\s*"
+                         rf"\d{{1,{Config.CAPTION_NUMBER_MAX_DIGITS}}}(?:[-–.]\d+)*\b")   # a word, then a small number
+
+
+def _lines_by_tables(md: str) -> list[str]:
+    """The lines right around each markdown table of a page: the two before it and the one after it."""
+    lines = [ln.strip() for ln in md.splitlines()]
+    out = []
+    for i in range(len(lines) - 1):
+        if _TABLE_ROW.match(lines[i]) and _TABLE_RULE.match(lines[i + 1]) and not (i and _TABLE_ROW.match(lines[i - 1])):
+            out += [ln for ln in lines[:i] if ln][-Config.CAPTION_LINES_BEFORE:]
+            j = i
+            while j < len(lines) and _TABLE_ROW.match(lines[j]):
+                j += 1
+            out += [ln for ln in lines[j:] if ln][:Config.CAPTION_LINES_AFTER]
+    return out
+
+
+def _lines_under_graphics(page) -> list[str]:
+    """The first line of each text block that starts right below a graphic big enough to be a figure."""
+    area = page.rect.width * page.rect.height
+    graphics = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]
+    graphics += [pymupdf.Rect(dr["rect"]) for dr in page.get_drawings()]
+    graphics = [g for g in graphics if _FIG_MIN_AREA * area <= g.width * g.height < Config.FIG_FULL_PAGE_SHARE * area]
+    out = []
+    for b in page.get_text("blocks"):
+        r = pymupdf.Rect(b[:4])
+        if b[6] == 0 and b[4].strip() and any(g.y1 - _EDGE <= r.y0 <= g.y1 + _CAPTION_GAP and r.x0 < g.x1 and r.x1 > g.x0
+                                              for g in graphics):
+            out.append(b[4].strip().splitlines()[0])
+    return out
+
+
+def document_labels(doc, page_md: dict) -> list[str]:
+    """The words a document opens its captions with ("Table", "Figure", "Hình", ...), learned from the lines that sit
+    by its tables and right below its figures, when they open with a word and a small number and repeat."""
+    lines = [ln for md in page_md.values() for ln in _lines_by_tables(md)]
+    lines += [ln for page in doc for ln in _lines_under_graphics(page)]
+    return lang.learn_labels([ln for ln in (re.sub(r"^[#*_\s]+", "", x) for x in lines) if _LABEL_LINE.match(ln)])
+
+
+def caption_re(labels) -> re.Pattern:
+    """A caption line: one of the document's labels and its number, then a stop, the line's end or text that does not
+    go on in lower case (that is a sentence citing it: "Table 2 shows ..."); without labels, the label-free form."""
+    if not labels:
+        return _ANY_CAPTION
+    words = "|".join(sorted((re.escape(l) for l in labels), key=len, reverse=True))
+    return regex.compile(rf"^[\W_]{{0,{Config.CAPTION_LEAD_MARKS}}}(?:{words})\s*\.?\s*\d+(?:[-–.]\d+)*\s*(?:[.:：)\-–—]|\s+(?!(?-i:\p{{Ll}}))|$)",
+                         regex.IGNORECASE)
 _MATH_OPEN = re.compile(r"^\s*(\\\[|\$\$|\\begin\{(equation|align|gather|multline)\*?\})")
 # a displayed equation written as a line: a short left-hand side, then the inline math (`RMSE(X,h) = \(\sqrt{...}\)`)
 _MATH_LINE = re.compile(r"^\s*([^\\]{0,40}?)\\\((.+)\\\)\s*[.,]?\s*$")
@@ -194,16 +300,35 @@ def _math_block(lines: list[str], i: int) -> tuple[str, int]:
     return f"$$ {inner.strip()} $$", j + 1
 
 
+def _markdown_table_lines(lines: list[str]) -> set:
+    """Indices of the lines of markdown tables: a run of `| … |` rows whose second line is a `|---|` rule."""
+    out: set = set()
+    i = 0
+    while i < len(lines):
+        if _TABLE_ROW.match(lines[i]) and i + 1 < len(lines) and _TABLE_RULE.match(lines[i + 1]):
+            j = i
+            while j < len(lines) and _TABLE_ROW.match(lines[j]):
+                j += 1
+            out.update(range(i, j))
+            i = j
+        else:
+            i += 1
+    return out
+
+
 def _split_fence(body: str) -> list[tuple[str, list[str]]]:
     """A fenced block as runs of ("code" | "prose", lines): the model often fences a whole page, listings and the
-    paragraphs around them together. A line is prose when it reads as words (>= 6, mostly plain); a blank, short or
-    indented line goes with the run it sits in."""
+    paragraphs around them together. A line is prose when it reads as words (>= 6, mostly plain) or belongs to a
+    markdown table (a program's printed output table, framed by `+---+` lines, stays in its listing); a blank, short, indented or plain line (words and numbers only, such as a page number or a running
+    head) goes with the run it sits in."""
+    lines = body.splitlines()
+    tables = _markdown_table_lines(lines)
     runs: list[tuple[str, list[str]]] = []
-    for ln in body.splitlines():
+    for n, ln in enumerate(lines):
         words = ln.split()
-        prose = len(words) >= 6 and _word_ratio(ln) >= 0.75 and not ln[:1].isspace()
+        prose = (len(words) >= 6 and _word_ratio(ln) >= 0.75 and not ln[:1].isspace()) or n in tables
         code = (bool(ln.strip()) and not prose and not _math_text(ln) and not _bare_math(ln.strip())
-                and _has_code_line(ln))
+                and not (_PLAIN_LINE.match(ln) and not _PROGRAM.search(ln)) and _has_code_line(ln))
         kind = "prose" if prose else "code" if code else (runs[-1][0] if runs else None)
         if kind is None or not runs or runs[-1][0] != kind:
             runs.append((kind or "prose", [ln]))
@@ -219,10 +344,32 @@ def _split_fence(body: str) -> list[tuple[str, list[str]]]:
     return out
 
 
-def _md_to_items(md: str, page_idx: int) -> list[dict]:
+def _plain_text_line(line: str) -> bool:
+    s = line.strip()
+    return bool(s) and not (_TABLE_ROW.match(s) or _MATH_OPEN.match(s) or _math_text(s) or _bare_math(s)
+                            or s.startswith(("$$", "\\]")))
+
+
+def _paragraph_lines(lines: list[str]) -> list[str]:
+    """Lines the model fenced, one paragraph each (it writes a paragraph on one line, so a heading stays apart from
+    the paragraph below it); table rows and lines of mathematics stay together."""
+    out: list[str] = []
+    for ln in lines:
+        if out and _plain_text_line(out[-1]) and _plain_text_line(ln):
+            out.append("")
+        out.append(ln)
+    return out
+
+
+def _label_only(text: str) -> bool:
+    """A caption label and its number with nothing else ("Table 1", "Figure 2.")."""
+    return len(re.sub(r"[\W\d_]+", " ", text).split()) == 1
+
+
+def _md_to_items(md: str, page_idx: int, caption: re.Pattern = _ANY_CAPTION) -> list[dict]:
     """A page's markdown as content_list items: headings and paragraphs as text, and -- as MinerU gives them -- display
     equations (`equation`), markdown tables (`table`, HTML) and code listings (`code`, lines and indentation kept). A
-    fence the model wrapped around prose is read as prose."""
+    fence the model wrapped around prose is read as prose. `caption`: what a table caption line looks like."""
     items: list[dict] = []
     buf: list[str] = []
 
@@ -256,13 +403,13 @@ def _md_to_items(md: str, page_idx: int) -> list[dict]:
                 else:
                     prose.extend(run)
             if not pieces:                           # prose the model fenced: read its lines as markdown
-                lines[i:j + 1] = lines[i + 1:j]
+                lines[i:j + 1] = _paragraph_lines(lines[i + 1:j])
                 continue
             for before, code in pieces:
-                items.extend(_md_to_items("\n".join(before), page_idx))
+                items.extend(_md_to_items("\n".join(_paragraph_lines(before)), page_idx, caption))
                 items.append({"type": "code", "sub_type": fence.group(2) or "code", "page_idx": page_idx,
                               "code_body": f"```{fence.group(2)}\n{code}\n```"})
-            items.extend(_md_to_items("\n".join(prose), page_idx))
+            items.extend(_md_to_items("\n".join(_paragraph_lines(prose)), page_idx, caption))
             i = j + 1
             continue
         if _MATH_OPEN.match(s):
@@ -290,12 +437,16 @@ def _md_to_items(md: str, page_idx: int) -> list[dict]:
             j = i
             while j < len(lines) and _TABLE_ROW.match(lines[j]):
                 j += 1
-            caption = []
-            if items and items[-1]["type"] == "text" and _TABLE_CAPTION.match(items[-1]["text"]):
-                caption = [items.pop()["text"]]
-            elif j < len(lines) and _TABLE_CAPTION.match(lines[j]):
-                caption, j = [lines[j].strip()], j + 1
-            items.append({"type": "table", "table_body": _table_html(lines[i:j]), "table_caption": caption,
+            named = []
+            if items and items[-1]["type"] == "text" and caption.match(items[-1]["text"]):
+                named = [items.pop()["text"]]
+            elif (len(items) > 1 and items[-1]["type"] == items[-2]["type"] == "text"
+                  and caption.match(items[-2]["text"]) and _label_only(items[-2]["text"])):
+                text = items.pop()["text"]                   # "Table 1" on its line, its title on the next
+                named = [f'{items.pop()["text"]} {text}']
+            elif j < len(lines) and caption.match(lines[j]):
+                named, j = [lines[j].strip()], j + 1
+            items.append({"type": "table", "table_body": _table_html(lines[i:j]), "table_caption": named,
                           "page_idx": page_idx})
             i = j
             continue
@@ -366,10 +517,10 @@ def _split_toc(page_md: dict[int, str]) -> tuple[str, dict[int, str]]:
     return toc_text, {idx: "\n".join(ls) for idx, ls in kept.items()}
 
 
-_FIG_CAPTION = re.compile(r"^\s*(?:Figure|Fig\.|Hình)\s*\d+[-–.]\d+\s*[.:]")
 _FIG_GAP = 36            # points: graphics this close above one another are parts of one figure
 _CAPTION_GAP = 60        # points: the figure ends at most this far above its caption
 _FIG_MIN_AREA = 0.02     # share of the page below which a captioned region is not a figure
+_EDGE = Config.FIG_EDGE_TOLERANCE_PT
 _PROSE_WORDS = 12        # a text block this long is a paragraph, never a label inside a figure
 
 
@@ -379,34 +530,50 @@ def _norm_bbox(r, page) -> list[float]:
     return [round(r.x0 / w * 1000, 1), round(r.y0 / h * 1000, 1), round(r.x1 / w * 1000, 1), round(r.y1 / h * 1000, 1)]
 
 
-def _page_figures(page, i: int, stem: str, images_dir: Path) -> list[dict]:
+def _across(a, b) -> bool:
+    """Whether two rects share some width: a figure's parts stand over its caption, not in the next column."""
+    return min(a.x1, b.x1) - max(a.x0, b.x0) > 0
+
+
+def _page_figures(page, i: int, stem: str, images_dir: Path, caption: re.Pattern = _ANY_CAPTION) -> list[dict]:
     """Figures of a page with a text layer, found from their captions: the graphics (raster images and vector
-    drawings) stacked right above a "Figure N-M." caption, with the labels inside them, rendered as one image."""
+    drawings) stacked right above a caption line ("Figure 3.", "Hình 2-1:") and sharing its width (or the width of
+    the figure gathered so far), then what stands beside them (a legend, a table's first column) unless that side of
+    the figure's band holds body text (_PROSE_WORDS words or more: another column), with the labels inside them,
+    rendered as one image."""
     blocks = [b for b in page.get_text("blocks") if b[6] == 0 and b[4].strip()]
-    captions = sorted((b for b in blocks if _FIG_CAPTION.match(b[4])), key=lambda b: b[1])
+    captions = sorted((b for b in blocks if caption.match(b[4])), key=lambda b: b[1])
     if not captions:
         return []
     page_area = page.rect.width * page.rect.height
-    graphics = [fitz.Rect(info["bbox"]) for info in page.get_image_info()]
-    graphics += [fitz.Rect(dr["rect"]) for dr in page.get_drawings()]
-    graphics = [g for g in graphics if (g.width > 0 or g.height > 0) and g.width * g.height < 0.9 * page_area]  # a rule line has no height
-    text = [(fitz.Rect(b[:4]), len(b[4].split())) for b in blocks if not _FIG_CAPTION.match(b[4])]
+    graphics = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]
+    graphics += [pymupdf.Rect(dr["rect"]) for dr in page.get_drawings()]
+    graphics = [g for g in graphics if (g.width > 0 or g.height > 0) and g.width * g.height < Config.FIG_FULL_PAGE_SHARE * page_area]  # a rule line has no height
+    text = [(pymupdf.Rect(b[:4]), len(b[4].split())) for b in blocks if not caption.match(b[4])]
     labels = [r for r, words in text if words < _PROSE_WORDS]
     prose = [r for r, words in text if words >= _PROSE_WORDS]
     out = []
     for k, cap in enumerate(captions):
-        c = fitz.Rect(cap[:4])
-        ceiling = max([fitz.Rect(o[:4]).y1 for o in captions if o[3] <= c.y0] + [page.rect.y0])
+        c = pymupdf.Rect(cap[:4])
+        ceiling = max([pymupdf.Rect(o[:4]).y1 for o in captions if o[3] <= c.y0] + [page.rect.y0])
         region, top = None, c.y0
-        for g in sorted((g for g in graphics if g.y1 <= c.y0 + 2 and g.y0 >= ceiling - 2), key=lambda g: -g.y1):
-            if g.y1 < top - (_FIG_GAP if region is not None else _CAPTION_GAP) or any(r.y0 >= g.y1 - 2 and r.y1 <= top + 2 for r in prose):
+        for g in sorted((g for g in graphics if g.y1 <= c.y0 + _EDGE and g.y0 >= ceiling - _EDGE), key=lambda g: -g.y1):
+            if not _across(g, c if region is None else region | c):
+                continue                             # another column's graphic
+            if g.y1 < top - (_FIG_GAP if region is not None else _CAPTION_GAP) or any(
+                    r.y0 >= g.y1 - _EDGE and r.y1 <= top + _EDGE and _across(r, g) for r in prose):
                 break                                # a gap or a paragraph: the figure ends here
-            region = fitz.Rect(g) if region is None else region | g
+            region = pymupdf.Rect(g) if region is None else region | g
             top = min(top, g.y0)
         if region is None:
             continue
+        band = lambda r: r.y0 >= region.y0 - _EDGE and r.y1 <= c.y0 + _EDGE
+        for side in (lambda r: r.x1 <= region.x0 + _EDGE, lambda r: r.x0 >= region.x1 - _EDGE):
+            if sum(words for r, words in text if band(r) and side(r)) < _PROSE_WORDS:
+                for g in [g for g in graphics if band(g) and side(g)] + [b for b in labels if band(b) and side(b)]:
+                    region |= g                      # a legend or a table's first column, no other column of text
         for b in labels:
-            if b.y0 >= region.y0 - 2 and b.y1 <= c.y0 + 2:
+            if band(b) and _across(b, region):
                 region |= b
         region &= page.rect
         if region.width * region.height < _FIG_MIN_AREA * page_area:
@@ -414,7 +581,7 @@ def _page_figures(page, i: int, stem: str, images_dir: Path) -> list[dict]:
         fname = f"{stem}_p{i}_fig{k}.png"
         fpath = images_dir / fname
         if not fpath.exists():
-            page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), clip=region).save(str(fpath))
+            page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0), clip=region).save(str(fpath))
         out.append({"type": "image", "img_path": f"images/{fname}", "image_caption": [" ".join(cap[4].split())],
                     "image_footnote": [], "bbox": _norm_bbox(region, page), "page_idx": i})
     return out
@@ -443,13 +610,39 @@ def _page_image_items(d, i: int, stem: str, images_dir: Path) -> list[dict]:
     return out
 
 
-def _caption_scanned(images: list[dict], texts: list[dict]) -> None:
-    """Scanned page: its "Figure N-M." lines read by OCR go, in reading order, to its figures large enough to be one."""
+def _caption_scanned(images: list[dict], texts: list[dict], caption: re.Pattern = _ANY_CAPTION) -> None:
+    """Scanned page: its caption lines read by OCR go, in reading order, to its figures large enough to be one."""
     big = sorted((im for im in images if (im["bbox"][2] - im["bbox"][0]) * (im["bbox"][3] - im["bbox"][1]) / 1e6
                   >= _FIG_MIN_AREA), key=lambda im: im["bbox"][1])
-    lines = [t for t in texts if _FIG_CAPTION.match(t.get("text", ""))]
+    lines = [t for t in texts if caption.match(t.get("text", ""))]
     for im, line in zip(big, lines):
         im["image_caption"] = [line["text"]]
+
+
+def _read_skipped(pdf: Path, idxs: list[int], page_md: dict[int, str], pages_dir: Path) -> None:
+    """Each page whose transcription lacks a sizeable text-layer block is read again with what was transcribed
+    painted white, and that reading follows the page's (cached as `<page>.extra.md`; a scan has no layer to compare)."""
+    todo = []
+    with pymupdf.open(str(pdf)) as d:
+        for i in idxs:
+            extra = pages_dir / f"{i}.extra.md"
+            if extra.exists():
+                text = extra.read_text(encoding="utf-8")
+                page_md[i] = f"{page_md.get(i, '')}\n\n{text}" if text.strip() else page_md.get(i, "")
+                continue
+            held = _held_blocks(d[i], page_md.get(i, ""))
+            if held is not None:
+                todo.append((i, _masked_png(d[i], held), _style_hint(_style_candidates(d[i]))))
+    if not todo:
+        return
+    with ThreadPoolExecutor(max_workers=Config.OCR_CONCURRENCY) as ex:
+        for i, md in ex.map(lambda pg: (pg[0], _ocr_cloud_page(pg[1], pg[2])), todo):
+            if md is None:
+                continue
+            (pages_dir / f"{i}.extra.md").write_text(md, encoding="utf-8")
+            if md.strip():
+                page_md[i] = f"{page_md.get(i, '')}\n\n{md}"
+    tqdm.write(f"[ocr] {len(todo)} page(s) read again for text the first reading skipped")
 
 
 def ocr_pdf(pdf: Path, out_dir: Path, pages: tuple[int, int] | None, on_progress=None) -> Path:
@@ -463,7 +656,7 @@ def ocr_pdf(pdf: Path, out_dir: Path, pages: tuple[int, int] | None, on_progress
     page_md: dict[int, str] = {}
     todo_idxs: list[int] = []
     image_items: list[dict] = []
-    with fitz.open(str(pdf)) as d:
+    with pymupdf.open(str(pdf)) as d:
         idxs = list(range(pages[0], min(pages[1], d.page_count - 1) + 1)) if pages else list(range(d.page_count))
         for i in idxs:
             f = pages_dir / f"{i}.md"
@@ -471,30 +664,42 @@ def ocr_pdf(pdf: Path, out_dir: Path, pages: tuple[int, int] | None, on_progress
                 page_md[i] = f.read_text(encoding="utf-8")
             else:
                 todo_idxs.append(i)
-            figures = _page_figures(d[i], i, stem, images_dir)
-            image_items += figures or _page_image_items(d, i, stem, images_dir)
-        todo = [(i, d[i].get_pixmap(matrix=fitz.Matrix(2.0, 2.0)).tobytes("png"),
+        todo = [(i, d[i].get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0)).tobytes("png"),
                  _style_hint(_style_candidates(d[i]))) for i in todo_idxs]
     if todo:
         total = len(todo)
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=Config.OCR_CONCURRENCY) as ex:
             results = ex.map(lambda pg: (pg[0], _ocr_cloud_page(pg[1], pg[2])), todo)
             if on_progress is None:
                 results = tqdm(results, total=total, desc="cloud OCR", unit="pg")
+            failed = []
             for done, (idx, md) in enumerate(results, 1):
-                (pages_dir / f"{idx}.md").write_text(md, encoding="utf-8")
-                page_md[idx] = md
+                if md is None:                       # not cached: the next run reads this page again
+                    failed.append(idx)
+                    page_md[idx] = ""
+                else:
+                    (pages_dir / f"{idx}.md").write_text(md, encoding="utf-8")
+                    page_md[idx] = md
                 if on_progress:
                     on_progress(done, total)
+        if failed:
+            raise RuntimeError(f"[ocr] {len(failed)} page(s) could not be read ({sorted(failed)[:10]}): run again to "
+                               f"read only those (the other pages are cached)")
+    _read_skipped(pdf, idxs, page_md, pages_dir)
 
     toc_text, page_md = _split_toc(page_md)
+    with pymupdf.open(str(pdf)) as d:
+        caption = caption_re(document_labels(d, page_md))
+        for i in idxs:
+            figures = _page_figures(d[i], i, stem, images_dir, caption)
+            image_items += figures or _page_image_items(d, i, stem, images_dir)
 
     text_items: list[dict] = []
     for idx in sorted(page_md):
-        page_text = _md_to_items(page_md[idx], idx)
+        page_text = _md_to_items(page_md[idx], idx, caption)
         page_images = [im for im in image_items if im["page_idx"] == idx]
         if page_images and not any(im["image_caption"] for im in page_images):
-            _caption_scanned(page_images, page_text)
+            _caption_scanned(page_images, page_text, caption)
         held = {" ".join(c.split()).casefold() for im in page_images for c in im["image_caption"]}
         text_items += [it for it in page_text if " ".join(it.get("text", "").split()).casefold() not in held]
 

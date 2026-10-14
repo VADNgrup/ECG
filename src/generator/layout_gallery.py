@@ -97,7 +97,7 @@ def build_lecture(out_dir: Path, names: List[str] = None) -> Path:
         content = [f["text"] for f in facts]
         slides.append({"slide": {"slide_number": number, "slide_title": spec.name.replace("_layout", "").replace("_", " ").title(),
                                  "slide_type": "content", "goal": spec.purpose, "kg_node_id": 1,
-                                 "grounding": {"facts": facts, "items": [], "packet_version": "chapters-v2", "outline": [], "omissions": []}},
+                                 "grounding": {"facts": facts, "items": [], "outline": [], "omissions": []}},
                        "content": content, "layout_hint": spec.name, "fact_ids": [[f["fact_id"]] for f in facts],
                        "groups": groups, "bullet_sources": [f["source_refs"] for f in facts], "speaker_notes": [],
                        "layout_structure": structure, "layout_reason": f"gallery sample of {spec.relation}"})

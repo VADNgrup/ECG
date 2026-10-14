@@ -129,6 +129,12 @@ Only the package and its install files are kept (`minirag/`, `pyproject.toml`, `
   concepts the deck's slides taught were extracted by gleaning only (no chunk's first pass had them). It costs
   about half of the extraction tokens, but turning it off would drop those concepts from the KG.
 
+- `minirag/prompt.py` `PROMPTS["entity_extraction"]` — 2026-10-27: only one example is kept (the one that shows the
+  splitting and attribution rules); the two format-only examples (Gradient Descent, Precision/Recall) are removed.
+  Measured on 30 HOML chunks, first pass + gleaning, gpt-4o-mini: 9,740 vs 10,982 tokens per chunk (−11%); the
+  deck's on-slide concepts found: 283 vs 308 and 278 for two runs of the old template (which agree on 69% of them),
+  i.e. within run-to-run variation. Changes the prompt hash ⇒ a rebuild re-pays extraction once.
+
 ## Re-applying after an upstream update
 Re-clone upstream, then re-apply the edits listed above. Structural KG / heading nodes / claims are added
 by the repo in a **post-build networkx pass** (see `src/rag/build_kg.py`), NOT by editing MiniRAG internals,

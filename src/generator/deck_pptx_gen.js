@@ -13,6 +13,8 @@ if (!manifestPath || !outputPath) {
   process.exit(1);
 }
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+// the deck's fixed words in the language of its content (src/workflow/deck_labels.py); English without them
+const label = (key, fallback) => (manifest.labels || {})[key] || fallback;
 
 // theme
 const T      = manifest.theme || {};
@@ -263,6 +265,17 @@ function removeUnusedSlidePlaceholders(xml) {
   });
 }
 
+// pptxgenjs writes a paragraph's properties before each of its runs; a paragraph holds one (its first), so a line of
+// runs in several styles (the agenda's number, verb and rest) stays valid DrawingML.
+function onePPr(xml) {
+  return xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (m, inner) => {
+    const at = inner.indexOf('<a:r>');
+    if (at < 0) return m;
+    const rest = inner.slice(at).replace(/<a:pPr\b[^>]*\/>|<a:pPr\b[^>]*>[\s\S]*?<\/a:pPr>/g, '');
+    return '<a:p>' + inner.slice(0, at) + rest + '</a:p>';
+  });
+}
+
 function numberFrom(name, re) { const m = name.match(re); return m ? Number(m[1]) : 0; }
 
 async function embedDesigns(zip, baseThemeXml) {
@@ -355,7 +368,7 @@ async function postProcess(buffer) {
   await Promise.all(Object.keys(zip.files).filter(n => deckXml.test(n)).map(async name => {
     let xml = themeAwareXml(await zip.files[name].async('string'));
     const slideNo = name.match(/^ppt\/slides\/slide(\d+)\.xml$/);
-    if (slideNo) xml = removeUnusedSlidePlaceholders(restoreTitle(xml, TITLE_BOXES.get(Number(slideNo[1]))));
+    if (slideNo) xml = onePPr(removeUnusedSlidePlaceholders(restoreTitle(xml, TITLE_BOXES.get(Number(slideNo[1])))));
     zip.file(name, xml);
   }));
   await embedDesigns(zip, baseThemeXml);
@@ -530,6 +543,12 @@ const BW = W - MX * 2;       // full body width = 9.0"
 
 const CTOP_Y = 0.26, CTOP_H = 0.21;  // chrome-top band
 const CBOT_Y = 5.18, CBOT_H = 0.21;  // chrome-bot band
+const PAGE_NUM_W = 0.68, FOOT_GAP = 0.2;   // the page number at the band's right; the footer line stops this short of it
+const FOOT_W = W - 2 * MX - PAGE_NUM_W - FOOT_GAP;
+// a content slide's footer: who presents, where, when -- what the deck was given (speaker, institution) and made on
+function footerText() {
+  return [manifest.speaker || '', manifest.institution || '', manifest.date || ''].filter(Boolean).join('  ·  ');
+}
 const TTL_Y  = 0.58, TTL_H  = 0.80;  // title text box (bottom-aligned; 3 lines at 19pt fits)
 const ULN_Y  = 1.41, ULN_H  = 0.04, ULN_W = 1.05;  // accent underline
 const BODY_Y = 1.55;
@@ -756,7 +775,7 @@ function defineLayouts() {
       objects.push({ placeholder: { options: { name: f.name, type: f.kind === 'pic' ? 'pic' : 'body', x: f.x, y: f.y, w: f.w, h: f.h,
         fontSize: 12, fontFace: FBODY, color: dim }, text: f.prompt } });
     }
-    if (!L.structural && manifest.date) objects.push({ text: { text: manifest.date, options: { x: MX, y: CBOT_Y, w: 2.25, h: CBOT_H, fontSize: 8, color: dim, fontFace: FMONO, valign: 'middle' } } });
+    if (!L.structural && footerText()) objects.push({ text: { text: footerText(), options: { x: MX, y: CBOT_Y, w: FOOT_W, h: CBOT_H, fontSize: 8, color: dim, fontFace: FMONO, valign: 'middle' } } });
     pptx.defineSlideMaster({ title: L.name, background: { color: bg }, objects });
     LAYOUT_NAME[L.id] = L.name;
     LAYOUT_SPEC[L.id] = L;
@@ -988,11 +1007,10 @@ function addChrome(slide, isLight, pageNum, minimal, ink) {
       fontSize: 9, color: dim, fontFace: FMONO, valign: 'middle', charSpacing: 1.5,
     });
   }
-  if (!minimal && !LAYOUT_CHROME[CURRENT_LAYOUT]) {   // a content layout's master carries the date
-    // Date
-    if (manifest.date) {
-      slide.addText(manifest.date, {
-        x: MX, y: CBOT_Y, w: 2.25, h: CBOT_H,
+  if (!minimal && !LAYOUT_CHROME[CURRENT_LAYOUT]) {   // a content layout's master carries the footer
+    if (footerText()) {
+      slide.addText(footerText(), {
+        x: MX, y: CBOT_Y, w: FOOT_W, h: CBOT_H,
         fontSize: 8, color: dim, fontFace: FMONO, valign: 'middle',
       });
     }
@@ -1000,7 +1018,7 @@ function addChrome(slide, isLight, pageNum, minimal, ink) {
   // Page number
   if (pageNum) {
     slide.addText(String(pageNum), {
-      x: W - MX - 0.68, y: CBOT_Y, w: 0.68, h: CBOT_H,
+      x: W - MX - PAGE_NUM_W, y: CBOT_Y, w: PAGE_NUM_W, h: CBOT_H,
       fontSize: 8, color: ink || ACC, fontFace: FMONO, valign: 'middle', align: 'right',
     });
   }
@@ -1165,8 +1183,8 @@ function hasHierarchy(groups) { return (groups || []).some(g => g.title && g.ite
 
 function childFs(fs) { return fs >= 14 ? fs - 2 : fs; }
 
-function _nestLines(text, width, fs) {
-  return wrapLines(String(text || '').trim(), Math.max(0.4, width), fs, 'body');
+function _nestLines(text, width, fs, bold) {
+  return wrapLines(String(text || '').trim(), Math.max(0.4, width), fs, 'body', !!bold);
 }
 
 // Height one group needs at parent size fs in a box w wide (mirrored by fit_model.nested_group_h).
@@ -1174,7 +1192,7 @@ function nestedGroupH(g, w, fs, dense) {
   const cfs = childFs(fs), ew = Math.max(0.4, w - 0.08 - NEST_IND);
   const line = BODY_LINE * (dense ? DENSE_LINE : 1), gap = dense ? 0.15 : 0.3;
   let h = 0;
-  if (g.title) h += _nestLines(g.title, ew, fs) * fs * line / 72 + fs * gap / 72;
+  if (g.title) h += _nestLines(g.title, ew, fs, true) * fs * line / 72 + fs * gap / 72;   // titles are drawn bold
   // items under a title (or continuing a titled group in the next column) are sub-bullets; others are top-level
   const child = !!(g.title || g.cont), ifs = child ? cfs : fs, cw = child ? ew - NEST_IND : ew;
   g.items.forEach((it, i) => {                      // the last child's gap is the group gap below
@@ -1225,7 +1243,7 @@ function addNested(slide, groups, x, y, w, h, isLight, maxFs, forceFs, dense) {
   if (!groups.length) return;
   const fit = forceFs ? { fs: forceFs, textH: nestedH(groups, w, forceFs, dense) }
                       : fitNested(groups, w, h, maxFs || 20, dense);
-  const extra = Math.max(0, h - fit.textH);
+  const extra = Math.max(0, h * 0.98 - fit.textH);     // the room spread between groups keeps fitNested's 2% margin
   const gap = Math.round(fit.fs * (dense ? 0.2 : 0.4) + (groups.length > 1 ? Math.min(0.22, extra / groups.length) : 0) * 72);
   const placeholder = placeholderFor(slide, 'body', x, y, w, h);
   slide.addText(nestedParas(groups, fit.fs, isLight, gap, { dense }),
@@ -1427,25 +1445,37 @@ function addImage(slide, imgPath, x, y, w, h) {
   }
 }
 
-// Image + a small centered caption underneath. Every caption is set at CAP_FS and its strip is as tall as its
-// wrapped text, so the (aspect-preserved) image takes the rest of the box and never overlaps it.
-const CAP_FS = 10;
-function captionH(caption, w) {
+// Image + a small centered caption underneath. A caption is set at CAP_FS and its strip is as tall as its wrapped
+// text, up to CAP_MAX_SHARE of the box: a longer one (a narrow column, a caption naming its source) is set smaller,
+// down to CAP_MIN_FS, so the (aspect-preserved) image always keeps the rest of the box and never overlaps it.
+const CAP_FS = 10, CAP_MIN_FS = 7, CAP_FS_STEP = 0.5, CAP_MAX_SHARE = 0.4;
+function captionH(caption, w, fs = CAP_FS) {
   const cap = caption ? toPlain(String(caption).trim()) : '';
   if (!cap) return 0;
   const ins = insetsOf({});
-  return wrapLines(cap, w - ins.l - ins.r, CAP_FS, 'body') * CAP_FS * LINE / 72 + ins.t + ins.b;
+  return wrapLines(cap, w - ins.l - ins.r, fs, 'body') * fs * LINE / 72 + ins.t + ins.b;
+}
+
+// {fs, h} of a caption in a box `w` wide and `boxH` tall: the largest size from CAP_FS down to CAP_MIN_FS whose strip
+// fits CAP_MAX_SHARE of the box; at CAP_MIN_FS the strip is held to that share (the fit guard sets the text in it).
+function captionFit(caption, w, boxH) {
+  const room = boxH * CAP_MAX_SHARE;
+  for (let f = CAP_FS; f >= CAP_MIN_FS; f -= CAP_FS_STEP) {
+    const h = captionH(caption, w, f);
+    if (h <= room) return { fs: f, h };
+  }
+  return { fs: CAP_MIN_FS, h: Math.min(captionH(caption, w, CAP_MIN_FS), room) };
 }
 
 function addImageCap(slide, imgPath, x, y, w, h, caption, isLight) {
   if (!imgPath || !fs.existsSync(imgPath)) return;
   const cap = caption ? String(caption).trim() : '';
-  const capH = captionH(cap, w);
-  addImage(slide, imgPath, x, y, w, h - capH);
+  const fit = captionFit(cap, w, h);
+  addImage(slide, imgPath, x, y, w, h - fit.h);
   if (cap) {
     slide.addText(toPlain(cap), {
-      x, y: y + h - capH, w, h: capH,
-      fontSize: CAP_FS, fontFace: FBODY, italic: true, color: dimC(isLight),
+      x, y: y + h - fit.h, w, h: fit.h,
+      fontSize: fit.fs, fontFace: FBODY, italic: true, color: dimC(isLight),
       align: 'center', valign: 'top', wrap: true,
     });
   }
@@ -1468,9 +1498,8 @@ function buildCover(s) {
   gradRect(slide, 0, 0, bandW, H, gradStops()[0], gradStops()[1], 'v');
   panelMotif(slide, 0, 0, bandW, H, ink);
   // kicker + a short underline
-  slide.addText('LECTURE', {
-    x: 0.5, y: 0.72, w: bandW - 0.9, h: 0.3, wrap: false,
-    fontSize: 12, fontFace: FMONO, color: ink, charSpacing: 3,
+  slide.addText(label('lecture', 'Lecture'), {
+    x: 0.5, y: 0.64, w: bandW - 0.9, h: DIV_KICKER_H, wrap: false, valign: 'middle', color: ink, fontSize: DIV_KICKER_FS, fontFace: FDISP, bold: true,
   });
   slide.addShape(pptx.ShapeType.rect, { x: 0.5, y: 1.06, w: 0.55, h: 0.028, fill: { color: ink, transparency: 25 }, line: { type: 'none' } });
 
@@ -1481,12 +1510,9 @@ function buildCover(s) {
     color: fgC(isLight), valign: 'middle', wrap: true, bold: true,
   });
   slide.addShape(pptx.ShapeType.rect, { x: rx, y: 3.95, w: 1.25, h: 0.05, fill: { color: ACC }, line: { type: 'none' } });
-  const footer = [speaker, date].filter(Boolean).join('    ·    ');
-  if (footer) {
-    slide.addText(footer, {
-      x: rx, y: 4.25, w: rw, h: 0.5,
-      fontSize: 13, fontFace: FBODY, color: dimC(isLight), valign: 'middle',
-    });
+  const footer = whoRuns(isLight, speaker, s.institution || manifest.institution || '', date, '    ·    ', rw);
+  if (footer.length) {
+    slide.addText(footer, { x: rx, y: 4.25, w: rw, h: 0.95, fontSize: whoFs(footer, rw, 0.95), fontFace: FBODY, valign: 'top' });
   }
 }
 
@@ -1557,6 +1583,73 @@ function buildToc(s) {
 }
 
 // bullets
+// ── a list of titled groups as cards: one card per group (a row of 2-3, a 2x2 grid of 4), each with its number, its
+// title and its points; every card one size. Taken only when every card's text fits at >= FLOOR_FS, else the list.
+const GCARD_MAX = 4;                    // more groups than this stay a list
+const GCARD_ROW_MAX = 3;                // up to this many cards in one row; more make a 2x2 grid
+const GCARD_GAP = 0.18;                 // between cards
+const GCARD_PAD = 0.16;                 // a card's inner margin
+const GCARD_BAR = 0.06;                 // the accent bar along a card's top
+const GCARD_NUM = 0.36;                 // the number chip's diameter
+const GCARD_NUM_GAP = 0.12;             // between the chip and the card's title
+const GCARD_NUM_FS = 12;
+const GCARD_HEAD_H = 0.7;               // the title's box: two lines at its largest size
+const GCARD_HEAD_MAX_FS = 18, GCARD_HEAD_MIN_FS = FLOOR_FS;
+const GCARD_BODY_GAP = 0.08;            // between the title row and the points
+const GCARD_BODY_MAX_FS = 16;
+const GCARD_TINT = 92;                  // the card's fill: the accent this transparent (light theme; dark adds 4)
+
+// A group card's points as dash bullets, one or several alike (cards of one slide look the same).
+function groupPoints(items, x, y, w, h, fs, color) {
+  return [items.map((t, i) => ({ text: capFirst(toPlain(t)), options: {
+    bullet: { code: '2013', color: ACC, indent: NEST_IND_PT }, fontSize: fs, fontFace: FBODY, color,
+    breakLine: i < items.length - 1, paraSpaceAfter: i === items.length - 1 ? 0 : Math.round(fs * 0.35) } })),
+    { x, y, w, h, valign: 'top', align: 'left', margin: [0.02, 0.04, 0.02, 0] }];
+}
+
+// The largest size (half points, <= maxFs) at which the points fit w x h as the fit guard measures them.
+function groupPointsFs(items, w, h, maxFs) {
+  for (let fs = maxFs; fs > 6; fs -= 0.5) {
+    const [t, o] = groupPoints(items, 0, 0, w, h, fs, '');
+    if (textScale(t, o) >= 1) return fs;
+  }
+  return 6;
+}
+
+// Card geometry and sizes for the groups in the x, y, w, h region; null when the groups are not titled cards or a
+// card's text would need less than FLOOR_FS.
+function groupCards(s, x, y, w, h) {
+  const groups = nestedGroups(s);
+  if (!s.groups || groups.length < 2 || groups.length > GCARD_MAX || !groups.every(g => g.title && g.items.length)) return null;
+  const n = groups.length, cols = n <= GCARD_ROW_MAX ? n : 2, rows = Math.ceil(n / cols);
+  const cw = (w - GCARD_GAP * (cols - 1)) / cols, ch = (h - GCARD_GAP * (rows - 1)) / rows;
+  const hw = cw - 2 * GCARD_PAD - GCARD_NUM - GCARD_NUM_GAP;
+  const headFs = Math.min(...groups.map(g => fitFontSize(g.title, hw, GCARD_HEAD_H, GCARD_HEAD_MAX_FS, GCARD_HEAD_MIN_FS, 'body', true)));
+  const headH = Math.max(GCARD_NUM, ...groups.map(g => wrapLines(g.title, hw - 0.2, headFs, 'body', true) * headFs * LINE / 72 + 0.1));
+  const bodyTop = GCARD_BAR + GCARD_PAD + headH + GCARD_BODY_GAP, bw = cw - 2 * GCARD_PAD, bh = ch - bodyTop - GCARD_PAD;
+  if (headFs < GCARD_HEAD_MIN_FS || bh <= 0) return null;
+  const bodyFs = Math.min(...groups.map(g => groupPointsFs(g.items, bw, bh, GCARD_BODY_MAX_FS)));
+  if (bodyFs < FLOOR_FS) return null;
+  return { groups, cols, cw, ch, hw, headFs, headH, bodyTop, bw, bh, bodyFs,
+           at: (i) => ({ x: x + (i % cols) * (cw + GCARD_GAP), y: y + Math.floor(i / cols) * (ch + GCARD_GAP) }) };
+}
+
+function drawGroupCards(slide, c, isLight) {
+  c.groups.forEach((g, i) => {
+    const { x, y } = c.at(i);
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w: c.cw, h: c.ch, rectRadius: 0.06,
+      fill: { color: ACC, transparency: isLight ? GCARD_TINT : GCARD_TINT - 4 }, line: { type: 'none' } });
+    slide.addShape(pptx.ShapeType.rect, { x, y, w: c.cw, h: GCARD_BAR, fill: { color: ACC }, line: { type: 'none' } });
+    const ry = y + GCARD_BAR + GCARD_PAD, nx = x + GCARD_PAD;
+    slide.addShape(pptx.ShapeType.ellipse, { x: nx, y: ry, w: GCARD_NUM, h: GCARD_NUM, fill: { color: ACC }, line: { type: 'none' } });
+    slide.addText(String(i + 1).padStart(2, '0'), { x: nx, y: ry, w: GCARD_NUM, h: GCARD_NUM, margin: 0, wrap: false,
+      fontSize: GCARD_NUM_FS, fontFace: FDISP, bold: true, color: textOn(ACC), align: 'center', valign: 'middle' });
+    slide.addText(g.title, { x: nx + GCARD_NUM + GCARD_NUM_GAP, y: ry, w: c.hw, h: c.headH, fontSize: c.headFs,
+      fontFace: FBODY, bold: true, color: fgC(isLight), valign: 'top', wrap: true });
+    slide.addText(...groupPoints(g.items, x + GCARD_PAD, y + c.bodyTop, c.bw, c.bh, c.bodyFs, fgC(isLight)));
+  });
+}
+
 function buildBullets(s) {
   const isLight = !!s.is_light;
   const slide   = pptx.addSlide();
@@ -1566,6 +1659,8 @@ function buildBullets(s) {
   const { F, plan } = roomFor(s.title, BW, (f) => planList(s, bs, BW - 0.5, f.bh - 0.24, 22));
   addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
   if (!bs.length) return;  // no content -> don't draw an empty panel (was rendering a blank block)
+  const cards = groupCards(s, MX, F.by, BW, F.bh);
+  if (cards) { drawGroupCards(slide, cards, isLight); return; }
   if (bs.length < 4) bgMotif(slide);  // sparse list -> add corner motif so the slide doesn't read empty
   // Soft tinted panel + accent side-stripe so the content area reads as a designed block, not bare
   // text floating on the background.
@@ -1580,18 +1675,24 @@ function buildBullets(s) {
 }
 
 // formula
-function _drawFormulaBox(slide, isLight, boxY, boxH) {
+// The equation's text box inside its formula box (mirrored by fit_model).
+const FORMULA_TEXT_X = 0.15;            // left inset
+const FORMULA_TEXT_Y = 0.06;            // top inset
+const FORMULA_TEXT_W = 0.23;            // width the left and right insets take
+const FORMULA_TEXT_H = 0.12;            // height the top and bottom insets take
+const FORMULA_ALONE_SHARE = 0.6;        // least share of the body a formula box without text takes
+function _drawFormulaBox(slide, isLight, boxY, boxH, x = MX, w = BW) {
   const BAR_W  = 0.06;  // left accent bar width
   const boxBg  = tintC(isLight, 8);
   // Background panel (slight tint)
   slide.addShape(pptx.ShapeType.rect, {
-    x: MX, y: boxY, w: BW, h: boxH,
+    x, y: boxY, w, h: boxH,
     fill: { color: boxBg },
     line: { type: 'none' },
   });
   // Accent left bar — mirrors HTML border-left: 4px solid var(--accent)
   slide.addShape(pptx.ShapeType.rect, {
-    x: MX, y: boxY, w: BAR_W, h: boxH,
+    x, y: boxY, w: BAR_W, h: boxH,
     fill: { color: ACC }, line: { type: 'none' },
   });
 }
@@ -1608,13 +1709,9 @@ function formulaLines(s) {
 
 function buildFormula(s) {
   const isLight = !!s.is_light;
-  const slide   = pptx.addSlide();
-  setBg(slide, isLight);
-  addChrome(slide, isLight, s.page_num);
-
   const bullets  = (s.bullets || []).filter(b => String(b || '').trim());
   const hasBulls = bullets.length > 0;
-  const natural = equationH(s, BW - 0.23, 24);
+  const natural = equationH(s, BW - FORMULA_TEXT_W, 24);
   const minBox = formulaMinH(formulaLines(s));
   // the box takes what the equation needs (up to 60% of the body); text that needs more takes it back
   const planFor = (f) => {
@@ -1622,7 +1719,7 @@ function buildFormula(s) {
     if (boxes[0] > minBox) boxes.push(minBox);
     let last = null;
     for (const box of boxes) {
-      const p = planList(s, bullets, BW, f.bh - box - 0.15, 20);
+      const p = planList(s, bullets, BW, f.bh - box - 0.15, FORMULA_TEXT_MAX_FS);
       last = { ...p, box };
       if (p.ok) break;
     }
@@ -1632,12 +1729,126 @@ function buildFormula(s) {
     return last;
   };
   const { F, plan } = hasBulls ? roomFor(s.title, BW, planFor) : { F: frame(false), plan: null };
+  if (hasBulls && !plan.ok) {                // stacked, the text or the formulas would not be readable: side by side
+    const side = roomFor(s.title, BW, (f) => formulaSidePlan(s, bullets, f));
+    if (side.plan.ok) return buildFormulaSide(s, side.F, side.plan);
+  }
+  const slide   = pptx.addSlide();
+  setBg(slide, isLight);
+  addChrome(slide, isLight, s.page_num);
   addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
-  const boxH = hasBulls ? plan.box : F.bh * 0.60;
+  const boxH = hasBulls ? plan.box : Math.min(F.bh, Math.max(F.bh * FORMULA_ALONE_SHARE, natural));
   const boxY = hasBulls ? F.by : F.by + (F.bh - boxH) / 2;
   _drawFormulaBox(slide, isLight, boxY, boxH);
-  drawEquation(slide, s, isLight, MX + 0.15, boxY + 0.06, BW - 0.23, boxH - 0.12, 24);
+  drawEquation(slide, s, isLight, MX + FORMULA_TEXT_X, boxY + FORMULA_TEXT_Y, BW - FORMULA_TEXT_W, boxH - FORMULA_TEXT_H, 24);
   if (hasBulls) drawList(slide, s, MX, boxY + boxH + 0.11, F.bh - boxH - 0.15, isLight, plan);
+}
+
+// formula-beside: the text on the left, the formulas in a column on the right, on the narrowest share that draws every
+// line whole at FIG_FORMULA_MIN_FS or more -- when stacked the two cannot both be readable (mirrored by
+// fit_model.formula_side_plan). The column is as tall as its lines need, level with the text.
+const FORMULA_TEXT_MAX_FS = 20;                  // largest size of the text with a formula
+const FORMULA_SIDE_SHARES = [0.35, 0.42, 0.50];  // the formula column's share of the width, narrowest first
+const FORMULA_SIDE_GAP = 0.3;                    // between the text and the formula column
+function formulaSidePlan(s, bullets, f) {
+  const lines = equationLines(s);
+  let last = { ok: false, fs: 0 };
+  for (const share of FORMULA_SIDE_SHARES) {
+    const fw = BW * share, tw = BW - fw - FORMULA_SIDE_GAP;
+    const eq = equationPlan(lines, fw - FORMULA_TEXT_W, f.bh - FORMULA_TEXT_H, FIG_FORMULA_MAX_FS);
+    if (!eq.fits || eq.fs < FIG_FORMULA_MIN_FS) continue;
+    const p = planList(s, bullets, tw, f.bh, FORMULA_TEXT_MAX_FS, 1);
+    last = { ...p, fw, tw, eq };
+    if (p.ok) return last;
+  }
+  return last;
+}
+function buildFormulaSide(s, F, plan) {
+  const isLight = !!s.is_light;
+  const slide = pptx.addSlide();
+  setBg(slide, isLight);
+  addChrome(slide, isLight, s.page_num);
+  addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
+  drawList(slide, s, MX, F.by, F.bh, isLight, plan);
+  const rows = plan.eq.lines.reduce((n, l) => n + wrapLines(l, plan.fw - FORMULA_TEXT_W - EQ_WRAP_INSET, plan.eq.fs, 'math'), 0);
+  const boxH = Math.min(F.bh, rows * plan.eq.fs * EQ_LINE / 72 + EQ_PAD + FORMULA_TEXT_H);
+  const x = MX + plan.tw + FORMULA_SIDE_GAP;
+  _drawFormulaBox(slide, isLight, F.by, boxH, x, plan.fw);
+  drawEquation(slide, s, isLight, x + FORMULA_TEXT_X, F.by + FORMULA_TEXT_Y, plan.fw - FORMULA_TEXT_W, boxH - FORMULA_TEXT_H,
+               FIG_FORMULA_MAX_FS);
+}
+
+// figure-asset: the slide's figure beside its formula or table, the text under both (mirrored by
+// fit_model.figure_asset_plan). The row takes the largest share of the body that leaves the text its largest size;
+// a formula or table that cannot be readable in half the width gets a page of its own (pptx_pipeline).
+const FIG_ASSET_GAP = 0.3;              // between the figure and the formula or table
+const FIG_ASSET_TEXT_GAP = 0.15;        // between the row and the text under it
+const FIG_ASSET_ROW_SHARES = [0.75, 0.68, 0.6, 0.52, 0.45];   // shares of the body the row tries, largest first
+const FIG_TEXT_MAX_FS = 20;             // largest size of the text under the row
+const FIG_FORMULA_MAX_FS = 24;          // largest size of the formula beside a figure
+const FIG_FORMULA_MIN_FS = 14;          // smallest size the formula may take beside a figure
+const FIG_CAPTION_GAP = 0.05;           // between a table and its caption
+const FIG_CAPTION_FS = 9;               // a table caption's size
+function figAssetFits(s, w, h) {
+  const t = _tableFrom(s);
+  if (t.headers.length) {
+    const room = h - (tableCaption(s) ? TABLE_CAPTION_ROOM : 0);
+    return tableFit(t.headers, t.rows, w, room, TABLE_SIDE_MAX_FS, TABLE_FLOOR_FS).fits;
+  }
+  const p = equationPlan(equationLines(s), w - FORMULA_TEXT_W, h - FORMULA_TEXT_H, FIG_FORMULA_MAX_FS);
+  return p.fits && p.fs >= FIG_FORMULA_MIN_FS;
+}
+function figAssetPlan(s, bullets, f) {
+  const half = (BW - FIG_ASSET_GAP) / 2;
+  const listIn = (row) => planList(s, bullets, BW, f.bh - row - FIG_ASSET_TEXT_GAP, FIG_TEXT_MAX_FS);
+  if (!bullets.length) return { ok: figAssetFits(s, half, f.bh), row: f.bh, half, p: null, fs: 0 };
+  let best = null;
+  for (const share of FIG_ASSET_ROW_SHARES) {
+    const row = f.bh * share;
+    if (!figAssetFits(s, half, row)) continue;
+    const p = listIn(row);
+    if (p.ok && (!best || p.fs > best.fs)) best = { ok: true, row, half, p, fs: p.fs };
+  }
+  if (best) return best;
+  const row = f.bh * FIG_ASSET_ROW_SHARES[FIG_ASSET_ROW_SHARES.length - 1];
+  const p = listIn(row);
+  return { ok: false, row, half, p, fs: p.fs };
+}
+function tableCaption(s) {
+  return toPlain((s.parsed_table && s.parsed_table.caption) || (s.table && s.table.table_caption) || '');
+}
+function buildFigAsset(s) {
+  const isLight = !!s.is_light;
+  const slide   = pptx.addSlide();
+  setBg(slide, isLight);
+  addChrome(slide, isLight, s.page_num);
+
+  const bullets = (s.bullets || []).filter(b => String(b || '').trim());
+  const { F, plan } = roomFor(s.title, BW, (f) => figAssetPlan(s, bullets, f));
+  addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
+  addImageCap(slide, (s.images || [])[0], MX, F.by, plan.half, plan.row, s.caption, isLight);
+  const ax = MX + plan.half + FIG_ASSET_GAP;
+  const t = _tableFrom(s);
+  if (t.headers.length) {
+    const cap = tableCaption(s);
+    const room = plan.row - (cap ? TABLE_CAPTION_ROOM : 0);
+    const fit = tableFit(t.headers, t.rows, plan.half, room, TABLE_SIDE_MAX_FS, TABLE_MIN_FS);
+    const ty = F.by + Math.max(0, (room - fit.height) / 2);
+    slide.addTable(tableData(t.headers, t.rows, isLight, fit), {
+      x: ax, y: ty, w: plan.half, rowH: fit.rowH, colW: fit.colW, border: { pt: 0.5, color: dimC(isLight) } });
+    if (cap) {
+      const ch = TABLE_CAPTION_ROOM - FIG_CAPTION_GAP;
+      slide.addText(cap, { x: ax, y: ty + fit.height + FIG_CAPTION_GAP, w: plan.half, h: ch,
+        fontSize: fitFontSize(cap, plan.half, ch, FIG_CAPTION_FS, CAP_MIN_FS, 'body', false), italic: true, color: dimC(isLight),
+        fontFace: FBODY, align: 'center', valign: 'top', wrap: true });
+    }
+  } else {
+    _drawFormulaBox(slide, isLight, F.by, plan.row, ax, plan.half);
+    drawEquation(slide, s, isLight, ax + FORMULA_TEXT_X, F.by + FORMULA_TEXT_Y, plan.half - FORMULA_TEXT_W,
+                 plan.row - FORMULA_TEXT_H, FIG_FORMULA_MAX_FS);
+  }
+  if (plan.p) drawList(slide, s, MX, F.by + plan.row + FIG_ASSET_TEXT_GAP, F.bh - plan.row - FIG_ASSET_TEXT_GAP,
+                       isLight, plan.p);
 }
 
 // image-right
@@ -1697,6 +1908,36 @@ function buildImgLeft(s) {
 }
 
 // two-columns — HTML: no vertical divider, just gap between columns
+// Decorations that only sit behind or around the text, so no text box moves or shrinks (the fit model is unchanged).
+const DECOR = {
+  cardBleed: 0.12,                      // how far a column's card reaches past its text box, left and right only (the
+                                        // title's rule sits just above the body and the footer just below it)
+  cardRadius: 0.1, cardTint: 4,         // the card: rounded, the page's text colour laid thinly over the page
+  barW: 0.05,                           // the accent bar along a card's left edge
+  ringOuter: 2.4, ringInner: 1.6, ringPt: 1, ringFade: 75, ringFadeInner: 84,   // rings bleeding off a corner
+  glow: 2.8, glowFade: 90,              // a soft disc bleeding off the opposite corner
+};
+// a tinted card with an accent bar down its left edge, behind a column whose text box is (x, y, w, h)
+function columnCard(slide, x, y, w, h, isLight) {
+  const b = DECOR.cardBleed;
+  slide.addShape(pptx.ShapeType.roundRect, { x: x - b, y, w: w + 2 * b, h, rectRadius: DECOR.cardRadius,
+                                             fill: { color: tintC(isLight, DECOR.cardTint) }, line: { type: 'none' } });
+  slide.addShape(pptx.ShapeType.rect, { x: x - b, y, w: DECOR.barW, h, fill: { color: ACC }, line: { type: 'none' } });
+}
+// two concentric rings centred on (cx, cy) -- a corner, so they bleed off the slide -- in `color`
+function cornerRings(slide, cx, cy, color) {
+  const el = (d, fade) => slide.addShape(pptx.ShapeType.ellipse, { x: cx - d / 2, y: cy - d / 2, w: d, h: d,
+                                                                   fill: { type: 'none' }, line: { color, pt: DECOR.ringPt, transparency: fade } });
+  el(DECOR.ringOuter, DECOR.ringFade);
+  el(DECOR.ringInner, DECOR.ringFadeInner);
+}
+// a soft disc centred on (cx, cy) -- a corner -- in `color`
+function cornerGlow(slide, cx, cy, color) {
+  const d = DECOR.glow;
+  slide.addShape(pptx.ShapeType.ellipse, { x: cx - d / 2, y: cy - d / 2, w: d, h: d,
+                                           fill: { color, transparency: DECOR.glowFade }, line: { type: 'none' } });
+}
+
 function buildTwoCols(s) {
   const isLight = !!s.is_light;
   const slide   = pptx.addSlide();
@@ -1708,6 +1949,8 @@ function buildTwoCols(s) {
   const GAP  = 0.38;
   const colW = (BW - GAP) / 2;
 
+  columnCard(slide, MX, BODY_Y, colW, BODY_H, isLight);
+  columnCard(slide, MX + colW + GAP, BODY_Y, colW, BODY_H, isLight);
   addBullets(slide, cols[0] || [], MX,             BODY_Y, colW, BODY_H, isLight);
   addBullets(slide, cols[1] || [], MX + colW + GAP, BODY_Y, colW, BODY_H, isLight);
 }
@@ -1727,28 +1970,36 @@ function parseMdTable(md) {
   return { headers: filt[0] || [], rows: filt.slice(1) };
 }
 
-// Content-aware table geometry.  Equal-width columns and one fixed row height
-// made a long header consume half the table while short numeric columns wasted
-// space.  Search 18..12pt, allocate widths by measured content, and compute one
-// height per wrapped row.  Returning fits=false lets callers reserve the whole
-// body instead of overlapping a takeaway.
+// Content-aware table geometry, mirrored by fit_model.table_fit. Columns get widths by measured content and every row
+// its wrapped height; sizes from maxFs down to minFs. fits=false lets a caller give the table a larger region.
+const TABLE_CELL_INSET = 0.12;          // a cell's left + right text insets; also a body row's vertical room
+const TABLE_HEAD_ROOM = 0.16;           // a header row's vertical room
+const TABLE_WORD_ROOM = 0.16;           // room around a column's longest word
+const TABLE_WORD_SLACK = 0.06;          // a column holds its longest word plus this
+const TABLE_COL_MIN = 0.72;             // narrowest column the content measure gives
+const TABLE_TYPICAL = 'abcd';           // a column is at least half this text wide (plus TABLE_TYPICAL_ROOM)
+const TABLE_TYPICAL_CHARS = 30;         // the opening of a cell that sets its column's typical width
+const TABLE_TYPICAL_ROOM = 0.34;        // added to half the typical width
+const TABLE_COL_FLOOR = 0.82;           // no column narrower than this or TABLE_COL_FLOOR_SHARE of an equal share
+const TABLE_COL_FLOOR_SHARE = 0.72;
 function tableFit(headers, rows, width, maxHeight, maxFs = 18, minFs = 12) {
   const clean = [headers, ...rows].map(row => headers.map((_, j) => toPlain((row || [])[j] || '')));
   const n = headers.length || 1;
   const geometry = (fs) => {
     const words = Array.from({ length: n }, (_, j) => Math.max(0.1, ...clean.map((row, ri) => row[j] || '')
-      .flatMap((v, ri) => v.split(/\s+/).map(w => textW(w, fs, 'body', ri === 0)))) + 0.16);
+      .flatMap((v, ri) => v.split(/\s+/).map(w => textW(w, fs, 'body', ri === 0)))) + TABLE_WORD_ROOM);
     const raw = Array.from({ length: n }, (_, j) => {
-      const typical = Math.max(textW('abcd', fs, 'body'), ...clean.map(row => textW((row[j] || '').slice(0, 30), fs, 'body')));
-      return Math.max(0.72, words[j] + 0.06, typical / 2 + 0.34);
+      const typical = Math.max(textW(TABLE_TYPICAL, fs, 'body'),
+        ...clean.map(row => textW((row[j] || '').slice(0, TABLE_TYPICAL_CHARS), fs, 'body')));
+      return Math.max(TABLE_COL_MIN, words[j] + TABLE_WORD_SLACK, typical / 2 + TABLE_TYPICAL_ROOM);
     });
-    const floor = Math.min(0.82, width / n * 0.72);
+    const floor = Math.min(TABLE_COL_FLOOR, width / n * TABLE_COL_FLOOR_SHARE);
     const base = raw.map(v => Math.max(floor, v));
     const scale = width / base.reduce((a, b) => a + b, 0);
     const colW = base.map(v => v * scale);
     const rowH = clean.map((row, ri) => {
-      const lines = Math.max(1, ...row.map((cell, j) => wrapLines(cell, Math.max(0.2, colW[j] - 0.12), fs, 'body', ri === 0)));
-      return lines * fs * LINE / 72 + (ri === 0 ? 0.16 : 0.12);           // cell insets 0.05" + room
+      const lines = Math.max(1, ...row.map((cell, j) => wrapLines(cell, Math.max(0.2, colW[j] - TABLE_CELL_INSET), fs, 'body', ri === 0)));
+      return lines * fs * LINE / 72 + (ri === 0 ? TABLE_HEAD_ROOM : TABLE_CELL_INSET);
     });
     // a column narrower than its longest word would break that word (numbers split mid-digit)
     const whole = colW.every((w, j) => w >= words[j]);
@@ -1774,6 +2025,8 @@ function tableData(headers, rows, isLight, fit) {
   ];
 }
 
+const TABLE_ALONE_MAX_FS = 18;          // largest size of a table on its own page (buildTable)
+const TABLE_CAPTION_ROOM = 0.35;        // body height a table alone leaves for its caption
 function buildTable(s) {
   const isLight = !!s.is_light;
   const slide   = pptx.addSlide();
@@ -1796,7 +2049,7 @@ function buildTable(s) {
     return;
   }
 
-  const fit = tableFit(headers, rows, BW, BODY_H - 0.35, 18, 7);
+  const fit = tableFit(headers, rows, BW, BODY_H - TABLE_CAPTION_ROOM, TABLE_ALONE_MAX_FS, TABLE_MIN_FS);
   const tblH   = fit.height;
   const tblTop = BODY_Y + Math.max(0, (BODY_H - tblH) / 2);
 
@@ -1845,13 +2098,12 @@ function buildTblAbove(s) {
     return;
   }
 
-  // the table's size and the text's are chosen together: the text as large as it can be with the table at most 2pt
-  // smaller, the table above the text or, when that leaves the text less, beside it
+  // the table's size and the text's are chosen together (tableTextPlan)
   const F = frame(titleCompactable(s.title, BW));
   addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
   const borderC = dimC(isLight);
   if (!hasBulls) {
-    const fit = tableFit(headers, rows, BW, F.bh - 0.05, 16, 7);
+    const fit = tableFit(headers, rows, BW, F.bh - 0.05, TABLE_ALONE_MAX_FS, TABLE_MIN_FS);
     slide.addTable(tableData(headers, rows, isLight, fit), {
       x: MX, y: F.by, w: BW, rowH: fit.rowH, colW: fit.colW, border: { pt: 0.5, color: borderC } });
     return;
@@ -1859,8 +2111,8 @@ function buildTblAbove(s) {
   const best = tableTextPlan(s, bullets, headers, rows, F);
   slide.addTable(tableData(headers, rows, isLight, best.fit), {
     x: MX, y: F.by, w: best.tw, rowH: best.fit.rowH, colW: best.fit.colW, border: { pt: 0.5, color: borderC } });
-  if (best.side) drawList(slide, s, MX + best.tw + 0.3, F.by, F.bh, isLight, best.p);
-  else drawList(slide, s, MX, F.by + best.fit.height + 0.10, best.room, isLight, best.p);
+  if (best.side) drawList(slide, s, MX + best.tw + TABLE_SIDE_GAP, F.by, F.bh, isLight, best.p);
+  else drawList(slide, s, MX, F.by + best.fit.height + TABLE_TEXT_GAP, best.room, isLight, best.p);
 }
 
 // The size a list plan's text is really shown at: its own, or what the fit guard leaves of it when it overflows h.
@@ -1869,23 +2121,36 @@ function shownFs(p, h) {
   return p.textH <= h * 0.98 ? fs : fs * h * 0.98 / p.textH;
 }
 
+// A table with text (mirrored by fit_model.table_text_plan): the table above the text or beside it, sized together so
+// the text is as large as it can be with the table at most TABLE_FS_GAP smaller. When the best plan leaves the table
+// under TABLE_FLOOR_FS or the text under FLOOR_FS, the manifest gives the table and the text a page each.
+const TABLE_FS_GAP = 2;
+const TABLE_FLOOR_FS = FLOOR_FS - TABLE_FS_GAP;   // readability floor of a table's cells
+const TABLE_MIN_FS = 7;                 // smallest size a table is drawn at
+const TABLE_ABOVE_MAX_FS = 14;          // largest size of a table above text
+const TABLE_SIDE_MAX_FS = 12;           // largest size of a table beside text
+const TABLE_SIDE_SHARES = [0.34, 0.42, 0.50, 0.58];   // width shares a table beside the text tries
+const TABLE_SIDE_GAP = 0.3;             // gap between a table and the text beside it
+const TABLE_TEXT_GAP = 0.10;            // gap between a table and the text under it
+const TABLE_TEXT_MIN_H = 0.35;          // least height of the text under a table
+const TABLE_TEXT_MAX_FS = 16;           // largest size of the text with a table
 function tableTextPlan(s, bullets, headers, rows, F) {
   let best = null;
   const consider = (c) => {
-    c.score = Math.min(c.textFs, c.fit.fs + 2);
+    c.score = Math.min(c.textFs, c.fit.fs + TABLE_FS_GAP);
     if (!best || c.score > best.score + 1e-6 || (Math.abs(c.score - best.score) < 1e-6 && c.textFs > best.textFs)) best = c;
   };
-  for (let tfs = 14; tfs >= 7; tfs--) {                       // table above, text below
+  for (let tfs = TABLE_ABOVE_MAX_FS; tfs >= TABLE_MIN_FS; tfs--) {   // table above, text below
     const fit = tableFit(headers, rows, BW, 0, tfs, tfs);
-    const room = F.bh - fit.height - 0.10;
-    if (room < 0.35 || (!fit.whole && tfs > 7)) continue;
-    const p = planList(s, bullets, BW, room, 16);
+    const room = F.bh - fit.height - TABLE_TEXT_GAP;
+    if (room < TABLE_TEXT_MIN_H || (!fit.whole && tfs > TABLE_MIN_FS)) continue;
+    const p = planList(s, bullets, BW, room, TABLE_TEXT_MAX_FS);
     consider({ fit, p, room, tw: BW, side: false, textFs: shownFs(p, room) });
   }
-  for (const share of [0.34, 0.42, 0.50, 0.58]) {             // table beside the text
+  for (const share of TABLE_SIDE_SHARES) {                     // table beside the text
     const tw = BW * share;
-    const p = planList(s, bullets, BW - tw - 0.3, F.bh, 16, 1);
-    for (let tfs = 12; tfs >= 7; tfs--) {
+    const p = planList(s, bullets, BW - tw - TABLE_SIDE_GAP, F.bh, TABLE_TEXT_MAX_FS, 1);
+    for (let tfs = TABLE_SIDE_MAX_FS; tfs >= TABLE_MIN_FS; tfs--) {
       const fit = tableFit(headers, rows, tw, 0, tfs, tfs);
       if (fit.height > F.bh || !fit.whole) continue;
       consider({ fit, p, room: F.bh, tw, side: true, textFs: shownFs(p, F.bh) });
@@ -1893,35 +2158,102 @@ function tableTextPlan(s, bullets, headers, rows, F) {
     }
   }
   if (!best) {                                                 // nothing leaves the text room: the smallest table
-    const fit = tableFit(headers, rows, BW, 0, 7, 7);
-    const room = Math.max(0.35, F.bh - fit.height - 0.10);
-    best = { fit, p: planList(s, bullets, BW, room, 16), room, tw: BW, side: false };
+    const fit = tableFit(headers, rows, BW, 0, TABLE_MIN_FS, TABLE_MIN_FS);
+    const room = Math.max(TABLE_TEXT_MIN_H, F.bh - fit.height - TABLE_TEXT_GAP);
+    best = { fit, p: planList(s, bullets, BW, room, TABLE_TEXT_MAX_FS), room, tw: BW, side: false };
   }
   return best;
 }
 
 // end
 // end — HTML: large display title (320px), 3-col footer with border-top separator
+// The closing slide: the thanks with who presented, where and when; the chapters' goals as a recap on a card (the
+// talk's conclusion, in the deck's own words); the document the talk is based on along the bottom.
+const END = {
+  split: 0.46,                          // share of the body width the thanks takes when a recap card sits beside it
+  ruleY: 1.75, ruleW: 1.1, ruleH: 0.06, // the accent rule above the thanks
+  titleY: 2.0, titleH: 1.5, titleFs: 54, titleMinFs: 30,
+  whoY: 3.65, whoH: 0.8, whoFs: 13,
+  gap: 0.3,                             // between the thanks and the card
+  cardY: 0.85, cardPad: 0.28, cardRadius: 0.12, cardTint: 6, cardBottomGap: 0.15,
+  barY: 0.25, barW: 0.06, barH: 0.42,   // the accent bar beside the card's heading
+  headY: 0.2, headH: 0.5, headFs: 18, bodyTop: 0.8,
+  recapFs: 14, recapMinFs: 9, recapStep: 0.5, paraAfter: 0.4,
+  sourceH: 0.4, sourceFs: 11, sourceMinFs: 8,
+  stripeW: 0.55,                        // variant 1: the accent stripe down the left edge
+};
+// The closing slide: END_VARIANTS designs, one per deck (pptx_pipeline.end_variant, like its cover and dividers), each
+// with the same parts -- the thanks, the speaker line, the recap beside them and the source under them:
+//   0  a faint motif over the background, the recap on a tinted card
+//   1  an accent gradient stripe down the left edge, the recap on a tinted card
+//   2  the recap on an accent gradient panel bleeding off the right edge, in the panel's ink
+const END_VARIANTS = 3;
 function buildEnd(s) {
   const isLight = !!s.is_light;
+  const v = ((s.variant | 0) % END_VARIANTS + END_VARIANTS) % END_VARIANTS;
   const slide = pptx.addSlide();
   setBg(slide, isLight);
-  bgMotif(slide);
-  const title = toPlain(s.title || 'Thank You');
-  // Centered large title with an accent rule above -- theme-consistent, clean closing.
-  slide.addShape(pptx.ShapeType.rect, { x: W / 2 - 0.55, y: 1.75, w: 1.1, h: 0.06, fill: { color: ACC }, line: { type: 'none' } });
+  if (v === 0) bgMotif(slide);
+  if (v === 1) gradRect(slide, 0, 0, END.stripeW, H, gradStops()[0], gradStops()[1], 'v');
+  const title = toPlain(s.title || label('thanks', 'Thank you'));
+  const recap = (s.summary || []).map(t => capFirst(toPlain(t))).filter(Boolean);
+  const source = toPlain(s.source || '');
+  const bottom = H - MX - END.sourceH;
+  const x0 = v === 1 ? END.stripeW + MX : MX, bw = MX + BW - x0;
+  const lw = recap.length ? MX + BW * END.split - x0 : bw;      // the stripe narrows the thanks, never the recap
+  const who = whoRuns(isLight, manifest.speaker, manifest.institution, manifest.date, '    ·    ', lw);
+  const align = recap.length ? 'left' : 'center';
+  slide.addShape(pptx.ShapeType.rect, { x: recap.length ? x0 + DIV_TEXT_INSET : x0 + (bw - END.ruleW) / 2, y: END.ruleY, w: END.ruleW,
+                                         h: END.ruleH, fill: { color: ACC }, line: { type: 'none' } });
   slide.addText(title, {
-    x: MX, y: 2.0, w: BW, h: 1.5,
-    fontSize: fitFontSize(title, BW, 1.5, 54, 30), fontFace: FDISP,
-    color: fgC(isLight), align: 'center', valign: 'middle', wrap: true, bold: true,
+    x: x0, y: END.titleY, w: lw, h: END.titleH,
+    fontSize: fitFontSize(title, lw, END.titleH, END.titleFs, END.titleMinFs), fontFace: FDISP,
+    color: fgC(isLight), align, valign: 'middle', wrap: true, bold: true,
   });
-  const meta = manifest.speaker || '';
-  if (meta) {
-    slide.addText(meta, {
-      x: MX, y: 3.65, w: BW, h: 0.45,
-      fontSize: 13, fontFace: FBODY, color: dimC(isLight), align: 'center', valign: 'middle',
+  if (who.length) {
+    slide.addText(who, {
+      x: x0, y: END.whoY, w: lw, h: END.whoH,
+      fontSize: whoFs(who, lw, END.whoH, END.whoFs), fontFace: FBODY,
+      align, valign: 'top', wrap: true,
     });
   }
+  if (recap.length) {
+    const cx = x0 + lw + END.gap, cw = MX + BW - cx, ch = bottom - END.cardBottomGap - END.cardY;
+    const panel = v === 2, ink = panel ? textOn(gradMid()) : null;
+    if (panel) {
+      gradRect(slide, cx - END.gap / 2, 0, W - cx + END.gap / 2, H, gradStops()[0], gradStops()[1], 'v');
+      cornerRings(slide, W, 0, ink);
+    } else {
+      slide.addShape(pptx.ShapeType.roundRect, { x: cx, y: END.cardY, w: cw, h: ch, rectRadius: END.cardRadius,
+                                                 fill: { color: tintC(isLight, END.cardTint) }, line: { type: 'none' } });
+    }
+    slide.addShape(pptx.ShapeType.rect, { x: cx, y: END.cardY + END.barY, w: END.barW, h: END.barH,
+                                          fill: { color: panel ? ink : ACC }, line: { type: 'none' } });
+    slide.addText(label('summary', 'Summary'), {
+      x: cx + END.cardPad, y: END.cardY + END.headY, w: cw - 2 * END.cardPad, h: END.headH,
+      fontSize: END.headFs, fontFace: FDISP, bold: true, color: panel ? ink : titleColor(isLight), valign: 'middle',
+    });
+    const bx = cx + END.cardPad, bw2 = cw - 2 * END.cardPad, by = END.cardY + END.bodyTop;
+    const bh = ch - END.bodyTop - END.cardPad / 2;
+    const tall = (fs) => recap.reduce((n, t) => n + estLines(t, bw2 - BULLET_IND_PT / 72 - 2 * DIV_TEXT_INSET, fs, 'body'), 0) * fs * LINE / 72
+                         + recap.length * fs * END.paraAfter / 72;
+    let fs = END.recapFs;
+    while (fs > END.recapMinFs && tall(fs) > bh) fs -= END.recapStep;
+    slide.addText(recap.map(t => ({ text: t, options: { bullet: true, breakLine: true, paraSpaceAfter: fs * END.paraAfter } })), {
+      x: bx, y: by, w: bw2, h: bh, fontSize: fs, fontFace: FBODY, color: panel ? ink : fgC(isLight), valign: 'top', wrap: true,
+    });
+  }
+  if (source) endSource(slide, source, x0, recap.length && v === 2 ? lw : bw, align, isLight);   // v2: off the panel
+}
+
+// A closing slide's source line ("Source: <the document>") along its foot, in `color` (the dim text colour by default).
+function endSource(slide, source, x, w, align, isLight, color) {
+  const line = `${label('source', 'Source')}: ${source}`;
+  slide.addText(line, {
+    x, y: H - MX - END.sourceH, w, h: END.sourceH,
+    fontSize: fitFontSize(line, w, END.sourceH, END.sourceFs, END.sourceMinFs, 'body', false), fontFace: FBODY,
+    italic: true, color: color || dimC(isLight), align, valign: 'middle', wrap: true,
+  });
 }
 
 // ── NEW chrome/content builders ────────────────────────────────────────────────────────────────
@@ -1932,21 +2264,20 @@ function buildCoverEditorial(s) {
   const slide = pptx.addSlide();
   setBg(slide, isLight);
   const title  = toPlain(s.title || manifest.lecture_title || '');
-  const inst   = s.institution || '';
+  const inst   = s.institution || manifest.institution || '';
   const author = s.author || manifest.speaker || '';
   const date   = s.date || manifest.date || '';
   slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.16, h: H, fill: { color: ACC }, line: { type: 'none' } });
   const lx = 0.92, lw = W - lx - MX;
-  const eyebrow = [ 'LECTURE', inst ].filter(Boolean).join('    ·    ').toUpperCase();
-  slide.addText(eyebrow, { x: lx, y: 0.72, w: lw, h: 0.3, wrap: false, fontSize: 12, fontFace: FMONO, color: ACC, charSpacing: 3 });
+  slide.addText(label('lecture', 'Lecture'), { x: lx, y: 0.64, w: lw, h: DIV_KICKER_H, wrap: false, valign: 'middle', color: ACC, fontSize: DIV_KICKER_FS, fontFace: FDISP, bold: true });
   slide.addShape(pptx.ShapeType.rect, { x: lx, y: 1.08, w: lw, h: 0.02, fill: { color: fgC(isLight), transparency: 80 }, line: { type: 'none' } });
   slide.addText(title, {
     x: lx, y: 1.35, w: lw, h: 2.55, fontSize: fitFontSize(title, lw, 2.55, 46, 24),
     fontFace: FDISP, color: titleColor(isLight), bold: true, valign: 'middle', wrap: true,
   });
   slide.addShape(pptx.ShapeType.rect, { x: lx, y: 4.14, w: 1.4, h: 0.05, fill: { color: ACC }, line: { type: 'none' } });
-  const foot = [ author, date ].filter(Boolean).join('    ·    ');
-  if (foot) slide.addText(foot, { x: lx, y: 4.42, w: lw, h: 0.4, fontSize: 13, fontFace: FBODY, color: dimC(isLight), valign: 'middle' });
+  const foot = whoRuns(isLight, author, inst, date, '    ·    ', lw);
+  if (foot.length) slide.addText(foot, { x: lx, y: 4.36, w: lw, h: 0.95, fontSize: whoFs(foot, lw, 0.95), fontFace: FBODY, valign: 'top' });
 }
 
 // cover variant: minimal — centered, thin full-width rules, lots of whitespace
@@ -1955,41 +2286,46 @@ function buildCoverMinimal(s) {
   const slide = pptx.addSlide();
   setBg(slide, isLight);
   const title  = toPlain(s.title || manifest.lecture_title || '');
-  const inst   = s.institution || '';
+  const inst   = s.institution || manifest.institution || '';
   const author = s.author || manifest.speaker || '';
   const date   = s.date || manifest.date || '';
   slide.addShape(pptx.ShapeType.rect, { x: MX, y: 0.82, w: BW, h: 0.02, fill: { color: fgC(isLight), transparency: 82 }, line: { type: 'none' } });
   slide.addShape(pptx.ShapeType.rect, { x: MX, y: H - 0.82, w: BW, h: 0.02, fill: { color: fgC(isLight), transparency: 82 }, line: { type: 'none' } });
-  slide.addText((inst || 'LECTURE').toUpperCase(), {
-    x: MX, y: 1.4, w: BW, h: 0.3, wrap: false, fontSize: 12, fontFace: FMONO, color: ACC, align: 'center', charSpacing: 4,
+  slide.addText(label('lecture', 'Lecture'), {
+    x: MX, y: 1.32, w: BW, h: DIV_KICKER_H, wrap: false, valign: 'middle', align: 'center', color: ACC, fontSize: DIV_KICKER_FS, fontFace: FDISP, bold: true,
   });
   slide.addText(title, {
     x: MX, y: 1.95, w: BW, h: 1.65, fontSize: fitFontSize(title, BW, 1.65, 46, 26),
     fontFace: FDISP, color: titleColor(isLight), bold: true, align: 'center', valign: 'middle', wrap: true,
   });
   slide.addShape(pptx.ShapeType.rect, { x: W / 2 - 0.6, y: 3.74, w: 1.2, h: 0.05, fill: { color: ACC }, line: { type: 'none' } });
-  const foot = [ author, date ].filter(Boolean).join('    ·    ');
-  if (foot) slide.addText(foot, { x: MX, y: 4.02, w: BW, h: 0.4, fontSize: 13, fontFace: FBODY, color: dimC(isLight), align: 'center', valign: 'middle' });
+  const foot = whoRuns(isLight, author, inst, date, '    ·    ', BW);
+  if (foot.length) slide.addText(foot, { x: MX, y: 3.98, w: BW, h: 0.76, fontSize: whoFs(foot, BW, 0.76), fontFace: FBODY, align: 'center', valign: 'top' });
 }
 
-// ending variant: credits — left-aligned big title + institution/author/acknowledgment lines
+// ending variant: credits -- a left-aligned big thanks over the speaker line and the acknowledgment; the deck's source
+// (the pipeline's closing slide) at the foot. No recap: a thanks slide, not a content one.
 function buildEndCredits(s) {
   const isLight = !!s.is_light;
   const slide = pptx.addSlide();
   setBg(slide, isLight);
-  const title  = toPlain(s.title || 'Thank you');
-  const inst   = s.institution || '';
+  const title  = toPlain(s.title || label('thanks', 'Thank you'));
+  const inst   = s.institution || manifest.institution || '';
   const author = s.author || manifest.speaker || '';
   const ack    = s.acknowledgment || '';
-  slide.addShape(pptx.ShapeType.rect, { x: MX, y: 1.68, w: 0.95, h: 0.06, fill: { color: ACC }, line: { type: 'none' } });
+  slide.addShape(pptx.ShapeType.rect, { x: MX + DIV_TEXT_INSET, y: 1.68, w: 0.95, h: 0.06, fill: { color: ACC }, line: { type: 'none' } });
   slide.addText(title, {
     x: MX, y: 1.92, w: BW, h: 1.3, fontSize: fitFontSize(title, BW, 1.3, 52, 28),
     fontFace: FDISP, color: titleColor(isLight), bold: true, valign: 'top', wrap: true,
   });
-  const line1 = [ author, inst ].filter(Boolean).join('    ·    ');
+  const who = whoRuns(isLight, author, inst, manifest.date, '    ·    ', BW);
   let y = 3.45;
-  if (line1) { slide.addText(line1, { x: MX, y, w: BW, h: 0.36, fontSize: 14, fontFace: FBODY, color: fgC(isLight), valign: 'middle' }); y += 0.42; }
+  if (who.length) {
+    const wh = who[0].text.includes('\n') ? 0.8 : 0.36;              // one part to a line takes three
+    slide.addText(who, { x: MX, y, w: BW, h: wh, fontSize: whoFs(who, BW, wh), fontFace: FBODY, valign: 'top' }); y += wh + 0.06;
+  }
   if (ack)   { slide.addText(capFirst(toPlain(ack)), { x: MX, y, w: BW * 0.82, h: 0.7, fontSize: 12, fontFace: FBODY, color: dimC(isLight), valign: 'top', wrap: true }); }
+  if (s.source) endSource(slide, toPlain(s.source), MX, BW, 'left', isLight);
 }
 
 // big-statement: one large declarative line + optional small supporting bullets
@@ -2170,7 +2506,11 @@ function connector(slide, x1, y1, x2, y2, color, w) {
 
 const minFitArr = (vals, dflt) => vals.length ? Math.min(...vals) : dflt;
 
-// comparison-columns: two labelled sides (A vs B), each a header + its own bullets (uniform sizes).
+// comparison-columns: two labelled sides (A vs B), each a header + its own bullets (uniform sizes). A side's label
+// sits on one line in its header band, between COMP_HDR_PAD margins, at COMP_HDR_MIN_FS at the least
+// (layout_select offers the layout only to labels that do).
+const COMP_HDR_PAD = 0.18;
+const COMP_HDR_MIN_FS = 12;
 function buildComparison(s) {
   const isLight = !!s.is_light;
   const slide = pptx.addSlide();
@@ -2190,7 +2530,8 @@ function buildComparison(s) {
     // header band (gradient) with the side label
     gradRect(slide, x, hdrY, colW, hdrH, gradStops()[0], gradStops()[1], 'h');
     slide.addText(toPlain(sd.label || (c === 0 ? 'A' : 'B')), {
-      x: x + 0.18, y: hdrY, w: colW - 0.36, h: hdrH, fontSize: fitFontSize(sd.label || '', colW - 0.36, hdrH, 18, 12),
+      x: x + COMP_HDR_PAD, y: hdrY, w: colW - 2 * COMP_HDR_PAD, h: hdrH,
+      fontSize: fitFontSize(sd.label || '', colW - 2 * COMP_HDR_PAD, hdrH, 18, COMP_HDR_MIN_FS),
       fontFace: FDISP, color: ink, bold: true, valign: 'middle', wrap: false,
     });
     const items = (sd.items || []).map(t => capFirst(toPlain(t))).filter(Boolean);
@@ -2480,28 +2821,93 @@ function _formulaEqs(s) {
     .filter(e => /[a-zA-Z0-9]/.test(e));
 }
 
-// Largest size (<= maxFs) at which the equation's lines fit w x h; a line wider than w wraps.
-function equationFs(lines, w, h, maxFs) {
-  for (let fs = maxFs; fs > 10; fs--) {
-    const rows = lines.reduce((n, l) => n + wrapLines(l, w - 0.2, fs, 'math'), 0);
-    if (rows * fs * 1.35 / 72 + 0.12 <= h) return fs;
+// An equation's lines in a text box (mirrored by fit_model.equation_plan).
+const EQ_WRAP_INSET = 0.2;              // box width its text does not wrap in
+const EQ_LINE = 1.35;                   // line height as a multiple of the size
+const EQ_PAD = 0.12;                    // height the box keeps beyond its lines
+const EQ_MIN_FS = 10;                   // smallest size an equation is drawn at
+const EQ_WHOLE_MIN_FS = 14;             // an equation keeps every line whole down to this size before one wraps
+const EQ_REL = '=<>≤≥≠≈≡≅∝∼≪≫⩽⩾→⇒⇔↔∈∉⊂⊆⊃⊇';   // relation signs: a further relation may start a new line
+const EQ_OPS = '+-−·×÷/*±∓∧∨∪∩⊕⊗';     // binary operators: they join the terms of one side
+const EQ_JOIN = ',';                    // a side's terms listed with a comma (x₁, x₂ ≥ 0)
+const EQ_SEP = '    ';                  // between two equations drawn on one line
+// The pieces a line may break between: before the left side of each further relation whose previous relation has a
+// right side (x₁ = 24 bowls | x₂ = 8 mugs; x + y ≤ 10 | 2x + y ≤ 16), never inside a chain (a ≤ b ≤ c) or a side.
+function equationSegments(line) {
+  const t = String(line).trim().split(/\s+/).filter(Boolean);
+  const isRel = (c) => EQ_REL.includes(c);
+  const isOp = (tok) => [...tok].every(c => EQ_OPS.includes(c));
+  const rels = t.map((tok, i) => ([...tok].some(isRel) ? i : -1)).filter(i => i >= 0);
+  const cuts = [0];
+  for (let r = 1; r < rels.length; r++) {
+    const i = rels[r], p = rels[r - 1];
+    let j = isRel([...t[i]][0]) ? i - 1 : i;
+    while (j - 1 > p) {
+      const before = t[j - 1];
+      if (isOp(before) && j - 2 > p) j -= 2;
+      else if ((EQ_OPS + EQ_JOIN).includes([...before].pop())) j -= 1;
+      else break;
+    }
+    if (j <= p || j <= cuts[cuts.length - 1]) continue;
+    const prev = [...t[p]];
+    let k = prev.length - 1;
+    while (k >= 0 && !isRel(prev[k])) k--;
+    if ((prev.slice(k + 1).join('') + t.slice(p + 1, j).join('')).trim()) cuts.push(j);
   }
-  return 10;
+  return cuts.map((c, n) => t.slice(c, cuts[n + 1]).join(' '));
 }
+// The lines drawn at fs in a box w wide: the equations of a line as many on a line as fit, EQ_SEP between two.
+function equationBreak(lines, w, fs) {
+  const whole = (l) => wrapLines(l, w - EQ_WRAP_INSET, fs, 'math') <= 1;
+  return lines.flatMap(line => {
+    const segs = equationSegments(line);
+    if (segs.length < 2) return [line];
+    const out = [];
+    for (const seg of segs) {
+      if (out.length && whole(out[out.length - 1] + EQ_SEP + seg)) out[out.length - 1] += EQ_SEP + seg;
+      else out.push(seg);
+    }
+    return out;
+  });
+}
+// Every equation of a line on a line of its own (a system of constraints read as one line is split).
+function equationSplit(lines) {
+  return lines.flatMap(l => { const segs = equationSegments(l); return segs.length < 2 ? [l] : segs; });
+}
+// {fs, lines, fits} of an equation in a text box w x h, the first that holds: each equation on its own line, every
+// line whole; the lines broken only where too wide, every line whole (both down to EQ_WHOLE_MIN_FS); the largest size
+// at which they fit with a line wrapped. Mirrored by fit_model.equation_plan.
+function equationPlan(lines, w, h, maxFs) {
+  const rows = (ls, fs) => ls.map(l => wrapLines(l, w - EQ_WRAP_INSET, fs, 'math'));
+  const fitsH = (r, fs) => r.reduce((n, k) => n + k, 0) * fs * EQ_LINE / 72 + EQ_PAD <= h;
+  const split = equationSplit(lines);
+  for (const make of [() => split, (fs) => equationBreak(lines, w, fs)]) {
+    for (let fs = maxFs; fs >= EQ_WHOLE_MIN_FS; fs--) {
+      const ls = make(fs), r = rows(ls, fs);
+      if (fitsH(r, fs) && r.every(k => k <= 1)) return { fs, lines: ls, fits: true };
+    }
+  }
+  for (let fs = Math.min(maxFs, EQ_WHOLE_MIN_FS - 1); fs > EQ_MIN_FS; fs--) {
+    const ls = equationBreak(lines, w, fs);
+    if (fitsH(rows(ls, fs), fs)) return { fs, lines: ls, fits: true };
+  }
+  return { fs: EQ_MIN_FS, lines: equationBreak(lines, w, EQ_MIN_FS), fits: false };
+}
+// The lines drawEquation draws: every formula of the slide, a blank line between two.
+function equationLines(s) { return (_formulaEqs(s).join('\n\n') || toPlain(s.title || '')).split('\n'); }
 
 // The slide's equation as Unicode text (Cambria Math), in the theme's text colour, centred in its box.
 function drawEquation(slide, s, isLight, x, y, w, h, maxFs) {
-  const eqs = _formulaEqs(s);
-  const text = eqs.join('\n\n') || toPlain(s.title || '');
-  const lines = text.split('\n');
-  slide.addText(text, { x, y, w, h, fontSize: equationFs(lines, w, h, maxFs), fontFace: 'Cambria Math',
+  const lines = equationLines(s);
+  const plan = equationPlan(lines, w, h, maxFs);
+  slide.addText(plan.lines.join('\n'), { x, y, w, h, fontSize: plan.fs, fontFace: 'Cambria Math',
     color: fgC(isLight), align: 'center', valign: 'middle', wrap: true });
 }
 
 // Height the equation needs at a comfortable size (the box never takes more).
 function equationH(s, w, fs) {
-  const lines = (_formulaEqs(s).join('\n\n') || ' ').split('\n');
-  return lines.reduce((n, l) => n + wrapLines(l, w - 0.2, fs, 'math'), 0) * fs * 1.35 / 72 + 0.3;
+  const lines = equationSplit((_formulaEqs(s).join('\n\n') || ' ').split('\n'));
+  return lines.reduce((n, l) => n + wrapLines(l, w - EQ_WRAP_INSET, fs, 'math'), 0) * fs * EQ_LINE / 72 + 0.3;
 }
 
 // formula-hero: one big formula centred in an accent-tint panel
@@ -2538,7 +2944,7 @@ function buildFormulaAnnotated(s) {
   _drawFormulaBox(slide, isLight, boxY, boxH);
   drawEquation(slide, s, isLight, MX + 0.2, boxY, BW - 0.4, boxH, 24);
   const listY = boxY + boxH + 0.22, listH = (BODY_Y + BODY_H) - listY;
-  slide.addText('WHERE', { x: MX, y: listY, w: 2, h: 0.26, wrap: false, fontSize: 11, fontFace: FMONO, color: ACC, charSpacing: 3 });
+  slide.addText(label('where', 'WHERE'), { x: MX, y: listY, w: 2, h: 0.26, wrap: false, fontSize: 11, fontFace: FMONO, color: ACC, charSpacing: 3 });
   const n = items.length || 1, rowH = (listH - 0.34) / n;
   const uFs = minFitArr(items.map(p => fitClip(p.d, bodyW(p), rowH, 14, 10).fs), 12);
   const termFs = minFitArr(items.filter(p => p.h).map(p => fitClip(p.h, termW, rowH, uFs + 1, 10).fs), uFs + 1);
@@ -2761,6 +3167,8 @@ function buildImageQuoteHero(s) {
 // toc-sidebar: gradient panel left ("Contents" + motif) + numbered list on the right. Up to TOC_ROWS entries take one
 // column; more take 2-3 columns of up to TOC_ROWS_MULTI rows beside a narrower panel, so a long contents stays on one page
 const TOC_ROWS = 7, TOC_ROWS_MULTI = 10, TOC_COLS = 3, TOC_COL_GAP = 0.3;
+const TOC_HEAD_MAX_FS = 44, TOC_HEAD_MIN_FS = 16;   // the sidebar's heading ("Contents"): its largest and smallest size
+const TOC_HEAD_Y = 1.2, TOC_HEAD_MAX_H = 3.4;       // its top, and the most height it may take
 function buildTocSidebar(s) {
   const isLight = !!s.is_light;
   const slide = pptx.addSlide();
@@ -2771,23 +3179,33 @@ function buildTocSidebar(s) {
   const panelW = cols > 1 ? 2.4 : 3.15, ink = textOn(gradMid());
   gradRect(slide, 0, 0, panelW, H, gradStops()[0], gradStops()[1], 'v');
   panelMotif(slide, 0, 0, panelW, H, ink);
-  slide.addText('Contents', { x: 0.5, y: 1.4, w: panelW - 0.8, h: 1.2,
-    fontSize: fitFontSize('Contents', panelW - 0.8, 0.6, 34, 16),           // one line: a word never breaks
-    fontFace: FDISP, color: ink, bold: true, valign: 'top', wrap: false });
-  slide.addShape(pptx.ShapeType.rect, { x: 0.55, y: 2.5, w: 0.7, h: 0.05, fill: { color: ink, transparency: 20 }, line: { type: 'none' } });
+  // the heading on as many lines as it needs, as large as its longest word allows on one line (a word never breaks)
+  const head = toPlain(label('contents', 'Contents')), hw = panelW - 0.8;
+  const perPt = Math.max(...head.split(/\s+/).map(wd => textW(wd, 1, 'display', true))) / WRAP_SAFE;
+  const hfs = Math.max(TOC_HEAD_MIN_FS, Math.min(fitFontSize(head, hw, TOC_HEAD_MAX_H, TOC_HEAD_MAX_FS, TOC_HEAD_MIN_FS, 'display'),
+                                                 Math.floor((hw - 2 * DIV_TEXT_INSET) / perPt)));
+  const hh = estLines(head, hw - 2 * DIV_TEXT_INSET, hfs, 'display', true) * hfs * LINE / 72 + DIV_TEXT_INSET;
+  slide.addText(head, { x: 0.5, y: TOC_HEAD_Y, w: hw, h: hh, fontSize: hfs, fontFace: FDISP, color: ink, bold: true, italic: true,
+    valign: 'bottom' });                                    // on the bar, whatever the line count's margin
+  slide.addShape(pptx.ShapeType.rect, { x: 0.5 + DIV_TEXT_INSET, y: TOC_HEAD_Y + hh + DIV_BAR_GAP, w: 0.7, h: 0.05,
+    fill: { color: ink, transparency: 20 }, line: { type: 'none' } });
   const lx = panelW + (cols > 1 ? 0.4 : 0.55), lw = W - lx - MX;
   const rows = Math.max(1, Math.ceil(items.length / cols));
   const cw = (lw - TOC_COL_GAP * (cols - 1)) / cols;
   const rowH = (H - 1.0) / rows;
-  const NUM_W = cols > 1 ? 0.45 : 0.66, PAGE_W = cols > 2 ? 0 : 0.5;   // three columns: no page column
-  const textW = cw - NUM_W - PAGE_W - (PAGE_W ? 0.1 : 0.05);
-  const uFs = minFitArr(items.map(it => fitClip(toPlain(it.t || ''), textW, rowH - 0.14, cols > 1 ? 15 : 19, 10).fs), 15);
+  const labels = items.map((it, i) => it.n || String(i + 1).padStart(2, '0'));
+  const NUM_FS = cols > 1 ? 18 : 24;                                   // the number's largest size
+  // the number column holds the widest number at its largest size, plus the box's 0.1" insets on each side
+  const NUM_W = Math.max(cols > 1 ? 0.45 : 0.66, Math.max(...labels.map(l => textW(l, NUM_FS, 'display', true))) / WRAP_SAFE + 0.2);
+  const PAGE_W = cols > 2 ? 0 : 0.5;                                   // three columns: no page column
+  const titleW = cw - NUM_W - PAGE_W - (PAGE_W ? 0.1 : 0.05);
+  const uFs = minFitArr(items.map(it => fitClip(toPlain(it.t || ''), titleW, rowH - 0.14, cols > 1 ? 15 : 19, 10).fs), 15);
   const top = 0.5 + ((H - 1.0) - rows * rowH) / 2;
   items.forEach((it, i) => {
     const c = Math.floor(i / rows), r = i % rows;
     const x = lx + c * (cw + TOC_COL_GAP), y = top + r * rowH;
-    slide.addText(it.n || String(i + 1).padStart(2, '0'), { x, y, w: NUM_W, h: rowH, wrap: false, fontSize: Math.min(cols > 1 ? 18 : 24, uFs + 6), fontFace: FDISP, color: ACC, bold: true, valign: 'middle' });
-    slide.addText(toPlain(it.t || ''), { x: x + NUM_W, y, w: textW, h: rowH, fontSize: uFs, fontFace: FBODY, color: fgC(isLight), bold: true, valign: 'middle', wrap: true });
+    slide.addText(labels[i], { x, y, w: NUM_W, h: rowH, wrap: false, fontSize: Math.min(NUM_FS, uFs + 6), fontFace: FDISP, color: ACC, bold: true, valign: 'middle' });
+    slide.addText(toPlain(it.t || ''), { x: x + NUM_W, y, w: titleW, h: rowH, fontSize: uFs, fontFace: FBODY, color: fgC(isLight), bold: true, valign: 'middle', wrap: true });
     if (it.p && PAGE_W) slide.addText(String(it.p), { x: x + cw - PAGE_W, y, w: PAGE_W, h: rowH, fontSize: cols > 1 ? 10 : 11, fontFace: FMONO, color: dimC(isLight), align: 'right', valign: 'middle', wrap: false });
     if (r < rows - 1 && i < items.length - 1) slide.addShape(pptx.ShapeType.rect, { x: x + NUM_W, y: y + rowH - 0.01, w: cw - NUM_W, h: 0.012, fill: { color: fgC(isLight), transparency: 85 }, line: { type: 'none' } });
   });
@@ -2799,7 +3217,7 @@ function buildTocTimeline(s) {
   const slide = pptx.addSlide();
   setBg(slide, isLight);
   addChrome(slide, isLight, s.page_num);
-  addTitle(slide, s.title || 'Contents', isLight);
+  addTitle(slide, s.title || label('contents', 'Contents'), isLight);
   const items = (s.toc_items || []).slice(0, 8);
   const n = items.length; if (!n) return;
   const spineX = MX + 0.9, topY = BODY_Y + 0.1, availH = BODY_H - 0.2, rowH = availH / n, DOT = 0.34;
@@ -2822,12 +3240,12 @@ function buildCoverHero(s) {
   const ink = textOn(gradMid());
   panelMotif(slide, 0, 0, W, H, ink);
   const title = toPlain(s.title || manifest.lecture_title || '');
-  const inst = s.institution || '';
-  slide.addText((inst || 'LECTURE').toUpperCase(), { x: MX, y: 1.35, w: BW, h: 0.32, wrap: false, fontSize: 13, fontFace: FMONO, color: ink, align: 'center', charSpacing: 4 });
+  slide.addText(label('lecture', 'LECTURE').toUpperCase(), { x: MX, y: 1.35, w: BW, h: 0.32, wrap: false, fontSize: 13, fontFace: FMONO, color: ink, align: 'center', charSpacing: 4 });
   slide.addText(title, { x: MX, y: 1.9, w: BW, h: 1.9, fontSize: fitFontSize(title, BW, 1.9, 54, 28), fontFace: FDISP, color: ink, bold: true, align: 'center', valign: 'middle', wrap: true });
   slide.addShape(pptx.ShapeType.rect, { x: W / 2 - 0.65, y: 3.95, w: 1.3, h: 0.055, fill: { color: ink, transparency: 15 }, line: { type: 'none' } });
-  const foot = [ s.author || manifest.speaker || '', s.date || manifest.date || '' ].filter(Boolean).join('    ·    ');
-  if (foot) slide.addText(foot, { x: MX, y: 4.25, w: BW, h: 0.4, fontSize: 13, fontFace: FBODY, color: ink, align: 'center', valign: 'middle' });
+  const parts = whoParts(s.author || manifest.speaker, s.institution || manifest.institution, s.date || manifest.date);
+  const foot = parts.length ? whoText(parts, BW, '    ·    ') : '';
+  if (foot) slide.addText(foot, { x: MX, y: 4.2, w: BW, h: 0.95, fontSize: whoFs([{ text: foot }], BW, 0.95, 13), fontFace: FBODY, color: ink, align: 'center', valign: 'top' });
 }
 
 // ending: contact / next-steps — left gradient stripe + Thank you + contact lines
@@ -2837,15 +3255,19 @@ function buildEndContact(s) {
   setBg(slide, isLight);
   const stripeW = 0.55;
   gradRect(slide, 0, 0, stripeW, H, gradStops()[0], gradStops()[1], 'v');
-  const title = toPlain(s.title || 'Thank you');
+  const title = toPlain(s.title || label('thanks', 'Thank you'));
   slide.addText(title, { x: MX + 0.4, y: 1.7, w: BW - 0.4, h: 1.2, fontSize: fitFontSize(title, BW - 0.4, 1.2, 50, 28), fontFace: FDISP, color: titleColor(isLight), bold: true, valign: 'top', wrap: true });
-  slide.addShape(pptx.ShapeType.rect, { x: MX + 0.42, y: 2.95, w: 0.95, h: 0.05, fill: { color: ACC }, line: { type: 'none' } });
-  const rows = [ s.author || manifest.speaker || '', s.institution || '', s.acknowledgment || '' ].filter(Boolean);
+  slide.addShape(pptx.ShapeType.rect, { x: MX + 0.4 + DIV_TEXT_INSET, y: 2.95, w: 0.95, h: 0.05, fill: { color: ACC }, line: { type: 'none' } });
+  // the speaker, institution and date stacked in one style (the footer), then the acknowledgment; the source at the foot
+  const rows = whoParts(s.author || manifest.speaker, s.institution || manifest.institution, manifest.date);
   let y = 3.25;
-  rows.forEach((t, i) => {
-    slide.addText(capFirst(toPlain(t)), { x: MX + 0.42, y, w: BW - 0.6, h: i === rows.length - 1 ? 0.7 : 0.36, fontSize: i === 0 ? 15 : 12, fontFace: FBODY, color: i === 0 ? fgC(isLight) : dimC(isLight), valign: 'top', wrap: true });
-    y += (i === rows.length - 1 ? 0.7 : 0.42);
+  const rowFs = Math.min(...rows.map(t => whoFs([{ text: t }], BW - 0.6, 0.36)));      // one size for every row
+  rows.forEach(t => {
+    slide.addText(t, { x: MX + 0.42, y, w: BW - 0.6, h: 0.36, fontSize: rowFs, fontFace: FBODY, color: dimC(isLight), valign: 'top', wrap: true });
+    y += 0.42;
   });
+  if (s.acknowledgment) slide.addText(capFirst(toPlain(s.acknowledgment)), { x: MX + 0.42, y, w: BW - 0.6, h: 0.7, fontSize: 12, fontFace: FBODY, color: dimC(isLight), valign: 'top', wrap: true });
+  if (s.source) endSource(slide, toPlain(s.source), MX + 0.42, BW - 0.42, 'left', isLight);
 }
 
 // ending: full-bleed gradient "Thank you" (a striking closing)
@@ -2855,11 +3277,13 @@ function buildEndGradient(s) {
   gradRect(slide, 0, 0, W, H, gradStops()[0], gradStops()[1], 'v', 26);
   const ink = textOn(gradMid());
   panelMotif(slide, 0, 0, W, H, ink);
-  const title = toPlain(s.title || 'Thank you');
+  const title = toPlain(s.title || label('thanks', 'Thank you'));
   slide.addShape(pptx.ShapeType.rect, { x: W / 2 - 0.6, y: 2.0, w: 1.2, h: 0.06, fill: { color: ink, transparency: 15 }, line: { type: 'none' } });
   slide.addText(title, { x: MX, y: 2.25, w: BW, h: 1.4, fontSize: fitFontSize(title, BW, 1.4, 60, 32), fontFace: FDISP, color: ink, bold: true, align: 'center', valign: 'middle', wrap: true });
-  const meta = [ s.author || manifest.speaker || '', s.institution || '' ].filter(Boolean).join('    ·    ');
-  if (meta) slide.addText(meta, { x: MX, y: 3.8, w: BW, h: 0.4, fontSize: 13, fontFace: FBODY, color: ink, align: 'center', valign: 'middle' });
+  const parts = whoParts(s.author || manifest.speaker, s.institution || manifest.institution, manifest.date);
+  const meta = parts.length ? whoText(parts, BW, '    ·    ') : '';
+  if (meta) slide.addText(meta, { x: MX, y: 3.75, w: BW, h: 0.8, fontSize: whoFs([{ text: meta }], BW, 0.8, 13), fontFace: FBODY, color: ink, align: 'center', valign: 'top' });
+  if (s.source) endSource(slide, toPlain(s.source), MX, BW, 'center', true, ink);
 }
 
 // image-above
@@ -3133,6 +3557,7 @@ function buildTwoContents(s) {
   const headH = Math.max(0, ...blocks.filter(b => b.subtitle).map(b =>
     wrapLines(toPlain(b.subtitle), colW - ins.l - ins.r, HEAD_FS, 'display') * HEAD_FS * LINE / 72 + ins.t + ins.b));
   const RULE = 0.017, RULE_GAP = 0.06;
+  blocks.forEach((block, i) => columnCard(slide, i === 0 ? MX : MX + colW + GAP, BODY_Y, colW, BODY_H, isLight));
   blocks.forEach((block, i) => {
     const x       = i === 0 ? MX : MX + colW + GAP;
     const subtitle = block.subtitle || '';
@@ -3338,11 +3763,21 @@ function buildThreeCols(s) {
 }
 
 // split-contrast
+const SPLIT_TITLE_Y = 1.16, SPLIT_TITLE_MIN_H = 0.60, SPLIT_TITLE_FS = 17;   // each side's title (split-contrast)
+const SPLIT_GAP = 0.12, SPLIT_BOTTOM = 0.45, SPLIT_PAD = 0.38;               // title -> bullets gap, bottom margin, side inset
+
 function buildSplitContrast(s) {
   const slide = pptx.addSlide();
   slide.background = { color: BGDARK };
   const sides = s.sides || [];
   const halfW = W / 2;
+  const sideW = halfW - 2 * SPLIT_PAD + 0.01;
+  // the title box holds its wrapped lines; both sides' bullets start below the taller title
+  const ins = insetsOf({});
+  const titleH = Math.max(SPLIT_TITLE_MIN_H, ...sides.slice(0, 2).map(side => side.title
+    ? wrapLines(toPlain(side.title), sideW - ins.l - ins.r, SPLIT_TITLE_FS, 'display') * LINE * SPLIT_TITLE_FS / 72 + ins.t + ins.b
+    : 0));
+  const bulletsY = SPLIT_TITLE_Y + titleH + SPLIT_GAP;
   sides.slice(0, 2).forEach((side, i) => {
     const x = i === 0 ? 0 : halfW;
     const isDark = i === 0;
@@ -3352,6 +3787,8 @@ function buildSplitContrast(s) {
       x, y: 0, w: halfW, h: H,
       fill: { color: bgColor }, line: { type: 'none' },
     });
+    if (isDark) cornerRings(slide, 0, 0, ACC);
+    else cornerGlow(slide, W, H, ACC);
     if (side.tag) {
       slide.addText(toPlain(side.tag), {
         x: x + 0.38, y: 0.75, w: halfW - 0.75, h: 0.30,
@@ -3360,12 +3797,12 @@ function buildSplitContrast(s) {
     }
     if (side.title) {
       slide.addText(toPlain(side.title), {
-        x: x + 0.38, y: 1.16, w: halfW - 0.75, h: 0.60,
-        fontSize: 17, fontFace: FDISP, color: fgColor, valign: 'top', wrap: true,
+        x: x + SPLIT_PAD, y: SPLIT_TITLE_Y, w: sideW, h: titleH,
+        fontSize: SPLIT_TITLE_FS, fontFace: FDISP, color: fgColor, valign: 'top', wrap: true,
       });
     }
     if (side.bullets && side.bullets.length) {
-      addBullets(slide, side.bullets, x + 0.38, 1.88, halfW - 0.75, H - 2.33, !isDark, 10);
+      addBullets(slide, side.bullets, x + SPLIT_PAD, bulletsY, sideW, H - SPLIT_BOTTOM - bulletsY, !isDark, 10);
     }
     if (isDark) {
       slide.addShape(pptx.ShapeType.rect, {
@@ -3453,7 +3890,9 @@ function buildNumConcl(s) {
   addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
   const { cols, rpc, colW, bfs, hfs, heights } = plan;
   const txtW = colW - NUM_TXT_X;
-  const numFs = Math.min(26, Math.round(Math.min(...heights) * 40));
+  const labels = rows.map((row, i) => toPlain(row.n || String(i + 1).padStart(2, '0')));
+  const widest = Math.max(...labels.map(l => textW(l, 1, 'display')));   // inches a number takes at 1pt
+  const numFs = Math.min(NUM_FS_MAX, Math.round(Math.min(...heights) * 40), Math.floor(NUM_W_CONCL * WRAP_SAFE / widest));
   const border = { color: fgC(isLight), transparency: 78 };
   for (let c = 0; c < cols; c++) {
     const x = MX + c * (colW + NUM_COL_GAP);
@@ -3465,8 +3904,8 @@ function buildNumConcl(s) {
       const i = c * rpc + r, rowH = heights[i] + spare;
       const headH = numConclHeadH(row, txtW, hfs);
       slide.addShape(pptx.ShapeType.rect, { x, y, w: colW, h: 0.014, fill: border, line: { type: 'none' } });
-      slide.addText(toPlain(row.n || String(i + 1).padStart(2, '0')), {
-        x, y: y + 0.04, w: NUM_W_CONCL, h: rowH - 0.08, wrap: false,
+      slide.addText(labels[i], {
+        x, y: y + 0.04, w: NUM_W_CONCL, h: rowH - 0.08, wrap: false, margin: 0,
         fontSize: numFs, fontFace: FDISP, color: ACC, valign: 'middle',
       });
       slide.addText(toPlain(row.heading || ''), {
@@ -3484,6 +3923,7 @@ function buildNumConcl(s) {
 // numbered conclusions: one column while the body keeps a comfortable size, two columns before it gets small; every
 // row as tall as its heading and body need at one size shared by the slide
 const NUM_W_CONCL = 0.62, NUM_TXT_X = 0.78, NUM_PAD = 0.07, NUM_COL_GAP = 0.45;
+const NUM_FS_MAX = 26;            // the row numbers' largest size (smaller when the rows or the number box are too small)
 const NUM_CONCL_TRIES = [[1, 14], [1, 13], [1, 12], [2, 14], [2, 13], [2, 12], [2, 11], [1, 11], [2, 10], [1, 10],
                          [2, 9], [1, 9], [2, 8], [1, 8]];
 
@@ -3768,19 +4208,99 @@ function _dividerWash(slide, isLight) {
 
 // Consistent "SECTION" kicker label so every divider variant shares one recognizable tell regardless of
 // its individual layout.
-function _dividerKicker(slide, x, y, color) {
-  slide.addText('SECTION', { x, y, w: 2.2, h: 0.3, fontSize: 10, fontFace: FMONO, color, bold: true, charSpacing: 3, valign: 'middle' });
+// The divider's kicker ("Chapter 1") as the document writes it, bold in the display face, like the title.
+const DIV_KICKER_FS = 18;
+function kickerText(s) { return toPlain((s && s.kicker) || label('section', 'Section')).trim(); }
+function _dividerKicker(slide, x, y, color, s) {
+  slide.addText(kickerText(s), { x, y, w: BW, h: DIV_KICKER_H, fontSize: DIV_KICKER_FS, fontFace: FDISP, color, bold: true,
+    valign: 'middle', wrap: false });
 }
 
-// section-divider — HTML always uses accent-color background with dark panel text
-// Section divider — 3 deterministic design variants (picked by s.variant so consecutive topic changes in
-// a deck don't all look identical).
+// Section divider -- DIVIDER_VARIANTS designs; a deck draws all its dividers in the one its `variant` names (chosen per
+// deck like its theme, pptx_pipeline). Each takes the divider's kicker ("Chapter 1"), title, number and agenda.
+const DIVIDER_VARIANTS = 5;
 function buildSectionDivider(s) {
-  const v = ((s.variant | 0) % 4 + 4) % 4;
+  const v = ((s.variant | 0) % DIVIDER_VARIANTS + DIVIDER_VARIANTS) % DIVIDER_VARIANTS;
   if (v === 1) return _sectionDividerSplit(s);
   if (v === 2) return _sectionDividerNumber(s);
   if (v === 3) return _sectionDividerProgress(s);
+  if (v === 4) return _sectionDividerAgenda(s);
   return _sectionDividerFull(s);
+}
+
+// v4: the theme's background; the section's number large in the accent on the left; its kicker, title and a short
+// accent bar on the right, with the goals it teaches (its agenda) under them, measured like a slide's list (one or two
+// columns, nothing cut). No agenda: the kicker, title and bar stand centred in the height. No number: the right part
+// takes the whole width.
+const DIV_TOP = 0.7;                    // the kicker's top
+const DIV_KICKER_H = 0.4;               // the kicker's height
+const DIV_NUM_W = 2.0;                  // the number's column
+const DIV_NUM_MAX_FS = 120, DIV_NUM_MIN_FS = 40;
+const DIV_GAP = 0.3;                    // between the number's column and the text
+const DIV_TEXT_INSET = 0.1;             // a text box's left inset: the accent bar starts where the text does
+const DIV_TITLE_H = 1.3;                // the most the title takes above an agenda
+const DIV_TITLE_ALONE_H = 2.0;          // and without one
+const DIV_TITLE_MAX_FS = 40, DIV_TITLE_ALONE_MAX_FS = 48, DIV_TITLE_MIN_FS = 22;
+const DIV_BAR_W = 0.8, DIV_BAR_H = 0.05, DIV_BAR_GAP = 0.12;   // the accent bar under the title, and around it
+const DIV_AGENDA_GAP = 0.3;             // between the bar and the agenda
+const DIV_BOTTOM = 0.6;                 // room the agenda leaves above the slide's foot
+const DIV_AGENDA_MAX_FS = 16;
+// A divider's agenda: its goals numbered 01, 02 ... in the accent, every line in one face, size and weight, one or two
+// columns, nothing cut. A numbered line has no bullet, so it is measured as a slide's list
+// (planList) one bullet indent wider, and its leftover height spaces the lines as addBullets does.
+function drawAgenda(slide, items, x, y, w, h, isLight) {
+  x += DIV_TEXT_INSET; w -= DIV_TEXT_INSET;               // its text starts where the title's does
+  const ind = BULLET_IND_PT / 72;
+  const plain = items.map(t => capFirst(toPlain(t)));
+  const numbered = plain.map((t, i) => `${String(i + 1).padStart(2, '0')}  ${t}`);
+  const plan = planList({ bullets: numbered }, numbered, w + ind, h, DIV_AGENDA_MAX_FS, 2);
+  const fs = listFsFor(plan, h), cw = plan.cw - ind;
+  let k = 0;
+  plan.columns.forEach((c, ci) => {
+    const lines = c.groups[0].items;
+    const gap = Math.min(0.28, Math.max(0, h - bulletsH(lines, plan.cw, fs, plan.dense)) / lines.length);
+    const para = { paraSpaceAfter: Math.round(fs * (plan.dense ? 0.2 : 0.45) + gap * 72),
+                   ...(plan.dense ? { lineSpacingMultiple: DENSE_LINE } : {}) };
+    const runs = [];
+    lines.forEach((_, j) => {
+      const text = plain[k++];
+      runs.push({ text: String(k).padStart(2, '0') + '  ', options: { ...para, color: ACC } });
+      runs.push({ text, options: { color: fgC(isLight), ...(j < lines.length - 1 ? { breakLine: true } : {}) } });
+    });
+    slide.addText(runs, { x: x + ci * (cw + COL_GAP), y, w: cw, h, fontSize: fs, fontFace: FBODY, valign: 'top', wrap: true,
+                          margin: BULLET_MARGIN });
+  });
+}
+
+function _sectionDividerAgenda(s) {
+  const isLight = !!s.is_light;
+  const slide = pptx.addSlide();
+  setBg(slide, isLight);
+  slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: ACC, transparency: isLight ? 92 : 88 }, line: { type: 'none' } });
+  addChrome(slide, isLight, s.page_num, true);
+  const number = toPlain(s.number || '');
+  const agenda = (s.agenda || []).map(a => capFirst(toPlain(a))).filter(a => a.trim());
+  const rx = number ? MX + DIV_NUM_W + DIV_GAP : MX, rw = W - rx - MX;
+  const title = toPlain(s.title || '');
+  const most = agenda.length ? DIV_TITLE_H : DIV_TITLE_ALONE_H;
+  const fs = fitFontSize(title, rw, most, agenda.length ? DIV_TITLE_MAX_FS : DIV_TITLE_ALONE_MAX_FS, DIV_TITLE_MIN_FS, 'display');
+  const titleH = Math.min(most, estLines(title, rw, fs, 'display', true) * fs * LINE / 72 + 2 * DIV_TEXT_INSET);
+  const block = DIV_KICKER_H + titleH + DIV_BAR_GAP * 2 + DIV_BAR_H;
+  const top = agenda.length ? DIV_TOP : (H - block) / 2;
+  _dividerKicker(slide, rx, top, ACC, s);
+  const ty = top + DIV_KICKER_H;
+  slide.addText(title, { x: rx, y: ty, w: rw, h: titleH, wrap: true, valign: 'top', fontSize: fs, fontFace: FDISP,
+    color: titleColor(isLight), bold: true });
+  const by = ty + titleH + DIV_BAR_GAP;
+  slide.addShape(pptx.ShapeType.rect, { x: rx + DIV_TEXT_INSET, y: by, w: DIV_BAR_W, h: DIV_BAR_H, fill: { color: ACC }, line: { type: 'none' } });
+  if (number) {
+    const nh = by + DIV_BAR_H - top;
+    slide.addText(number, { x: MX, y: top, w: DIV_NUM_W, h: nh, wrap: false, valign: 'middle',
+      fontSize: fitFontSize(number, DIV_NUM_W, nh, DIV_NUM_MAX_FS, DIV_NUM_MIN_FS, 'display'), fontFace: FDISP, color: ACC, bold: true });
+  }
+  if (!agenda.length) return;
+  const ay = by + DIV_BAR_H + DIV_AGENDA_GAP, ah = H - ay - DIV_BOTTOM;
+  drawAgenda(slide, agenda, rx, ay, rw, ah, isLight);
 }
 
 // v3: title + a segmented PROGRESS bar (current section highlighted among the deck's sections, no digits)
@@ -3790,7 +4310,7 @@ function _sectionDividerProgress(s) {
   setBg(slide, isLight);
   _dividerWash(slide, isLight);
   addChrome(slide, isLight, s.page_num, true);
-  _dividerKicker(slide, MX, 0.55, ACC);
+  _dividerKicker(slide, MX, 0.55, ACC, s);
   const idx = parseInt(String(s.section_num || '').replace(/\D/g, ''), 10) || 1;
   const total = Math.max(idx, s.section_total || idx);
   const title = toPlain(s.title || '');
@@ -3804,22 +4324,53 @@ function _sectionDividerProgress(s) {
   }
 }
 
-// v0: full-bleed accent GRADIENT background, number + big title + lead
+// v0: the theme's background with an accent half disc along the right edge (its radius half the slide's height, so it
+// meets the top and bottom) holding the section's number whole; the kicker in an accent pill, the title, a short accent
+// bar and the agenda on the left of the disc (measured like a slide's list, nothing cut); no agenda: the title block
+// stands centred in the height.
+const DIV0_PILL_FS = 16, DIV0_PILL_PAD = 0.22, DIV0_PILL_H = 0.44;   // the kicker's pill: size, side padding, height
+const DIV0_DISC_FADE = 86;              // the half disc's transparency
+const DIV0_DISC_GAP = 0.4;              // between the text and the disc
+const DIV0_NUM_FILL = 0.8;              // the number's box: this share of the largest rectangle inside the half disc
+const DIV0_NUM_MAX_FS = 240, DIV0_NUM_FADE = 60;   // its largest size and transparency
 function _sectionDividerFull(s) {
+  const isLight = !!s.is_light;
   const slide = pptx.addSlide();
-  slide.background = { color: gradStops()[1] };
-  gradRect(slide, 0, 0, W, H, gradStops()[0], gradStops()[1], 'v', 22);
-  const fg = textOn(gradMid());
-  const inkIsDark = hexLum(fg) < 0.5;
-  addChrome(slide, inkIsDark, s.page_num, true, fg);
-  _dividerKicker(slide, MX, 0.55, fg);
+  setBg(slide, isLight);
+  const number = toPlain(s.number || '');
+  const r = H / 2;
+  slide.addShape(pptx.ShapeType.ellipse, { x: W - r, y: 0, w: 2 * r, h: 2 * r,
+    fill: { color: ACC, transparency: DIV0_DISC_FADE }, line: { type: 'none' } });
+  if (number) {
+    // the largest rectangle inside the half disc is r/sqrt2 wide and r*sqrt2 tall, against the slide's edge
+    const rw = r / Math.SQRT2, rh = r * Math.SQRT2, nw = rw * DIV0_NUM_FILL, nh = rh * DIV0_NUM_FILL;
+    slide.addText(number, { x: W - rw + (rw - nw) / 2, y: (H - nh) / 2, w: nw, h: nh, wrap: false, align: 'center',
+      valign: 'middle', fontSize: fitFontSize(number, nw, nh, DIV0_NUM_MAX_FS, DIV_NUM_MIN_FS, 'display'),
+      fontFace: FDISP, color: ACC, bold: true, transparency: DIV0_NUM_FADE });
+  }
+  addChrome(slide, isLight, s.page_num, true);
+  const agenda = (s.agenda || []).map(a => capFirst(toPlain(a))).filter(a => a.trim());
+  const tw = W - r - DIV0_DISC_GAP - MX;
+  const kicker = kickerText(s);
+  const pillW = textW(kicker, DIV0_PILL_FS, 'display', true) / WRAP_SAFE + 2 * DIV0_PILL_PAD;
   const title = toPlain(s.title || '');
-  slide.addText(title, {
-    x: MX, y: 0.83, w: BW, h: H - 2.85,
-    fontSize: fitFontSize(title, BW, H - 2.85, 60, 30), fontFace: FDISP, color: fg, bold: true, valign: 'middle', wrap: true,
-  });
-  slide.addShape(pptx.ShapeType.rect, { x: MX, y: H - 1.19, w: BW, h: 0.014, fill: { color: fg, transparency: 70 }, line: { type: 'none' } });
-  if (s.lead) slide.addText(toPlain(s.lead), { x: MX, y: H - 1.07, w: BW * 0.7, h: 0.38, fontSize: 10, fontFace: FBODY, color: fg, valign: 'middle' });
+  const most = agenda.length ? DIV_TITLE_H : DIV_TITLE_ALONE_H;
+  const fs = fitFontSize(title, tw, most, agenda.length ? DIV_TITLE_MAX_FS : DIV_TITLE_ALONE_MAX_FS, DIV_TITLE_MIN_FS, 'display');
+  const titleH = Math.min(most, estLines(title, tw, fs, 'display', true) * fs * LINE / 72 + 2 * DIV_TEXT_INSET);
+  const block = DIV0_PILL_H + DIV_BAR_GAP + titleH + DIV_BAR_GAP * 2 + DIV_BAR_H;
+  const top = agenda.length ? DIV_TOP : (H - block) / 2;
+  slide.addShape(pptx.ShapeType.roundRect, { x: MX + DIV_TEXT_INSET, y: top, w: pillW, h: DIV0_PILL_H, rectRadius: DIV0_PILL_H / 2,
+    fill: { color: ACC }, line: { type: 'none' } });
+  slide.addText(kicker, { x: MX + DIV_TEXT_INSET, y: top, w: pillW, h: DIV0_PILL_H, align: 'center', valign: 'middle', wrap: false,
+    margin: 0, fontSize: DIV0_PILL_FS, fontFace: FDISP, color: textOn(ACC), bold: true });
+  const ty = top + DIV0_PILL_H + DIV_BAR_GAP;
+  slide.addText(title, { x: MX, y: ty, w: tw, h: titleH, wrap: true, valign: 'top', fontSize: fs, fontFace: FDISP,
+    color: fgC(isLight), bold: true });
+  const by = ty + titleH + DIV_BAR_GAP;
+  slide.addShape(pptx.ShapeType.rect, { x: MX + DIV_TEXT_INSET, y: by, w: DIV_BAR_W, h: DIV_BAR_H, fill: { color: ACC }, line: { type: 'none' } });
+  if (!agenda.length) return;
+  const ay = by + DIV_BAR_H + DIV_AGENDA_GAP, ah = H - ay - DIV_BOTTOM;
+  drawAgenda(slide, agenda, MX, ay, tw, ah, isLight);
 }
 
 // v1: split — accent gradient panel left with decorative motif, title on the theme background at right
@@ -3833,7 +4384,9 @@ function _sectionDividerSplit(s) {
   gradRect(slide, 0, 0, panelW, H, gradStops()[0], gradStops()[1], 'v');
   const ink = textOn(gradMid());
   panelMotif(slide, 0, 0, panelW, H, ink);
-  slide.addText('SECTION', { x: 0.5, y: 0.7, w: panelW - 0.8, h: 0.4, wrap: false, fontSize: 12, fontFace: FMONO, color: ink, bold: true, charSpacing: 3 });
+  const kicker = kickerText(s);
+  slide.addText(kicker, { x: 0.5, y: 0.7, w: panelW - 0.8, h: DIV_KICKER_H, wrap: false, valign: 'middle',
+    fontSize: fitFontSize(kicker, panelW - 0.8, DIV_KICKER_H, DIV_KICKER_FS, 8, 'display'), fontFace: FDISP, color: ink, bold: true });
   const rx = panelW + 0.55, rw = W - rx - MX;
   const title = toPlain(s.title || '');
   slide.addText(title, {
@@ -3851,7 +4404,7 @@ function _sectionDividerNumber(s) {
   _dividerWash(slide, isLight);
   bgMotif(slide);
   addChrome(slide, isLight, s.page_num, true);
-  _dividerKicker(slide, MX, 0.55, ACC);
+  _dividerKicker(slide, MX, 0.55, ACC, s);
   slide.addShape(pptx.ShapeType.rect, { x: MX, y: 1.5, w: 0.95, h: 0.06, fill: { color: ACC }, line: { type: 'none' } });
   const title = toPlain(s.title || '');
   slide.addText(title, {
@@ -4137,165 +4690,71 @@ function buildTocDescribed(s) {
   });
 }
 
-// cover-split — large title left, key-value meta rows right, vertical divider
+// The opening and closing slides' who-presents parts: the speaker and the institution each after its label in the deck's
+// language ("Presenter: …", "Institution: …"), then the date.
+function whoParts(speaker, institution, date) {
+  const tagged = (key, fallback, value) => { const t = toPlain(value || '').trim(); return t ? `${label(key, fallback)}: ${t}` : ''; };
+  return [tagged('presenter', 'Presenter', speaker), tagged('institution', 'Institution', institution),
+          toPlain(date || '').trim()].filter(Boolean);
+}
+const WHO_FS = 14, WHO_MIN_FS = 9;      // the who line's size, and the least it shrinks to
+const WHO_LINE_MIN_FS = 12;             // below this size on one line, the parts go one to a line instead
+// The parts on one line when it reads at WHO_LINE_MIN_FS or more in w inches, else one part to a line (never a part
+// broken across lines).
+function whoText(parts, w, sep) {
+  const one = parts.join(sep);
+  return textW(one, WHO_LINE_MIN_FS, 'body', false) / WRAP_SAFE <= w - 2 * DIV_TEXT_INSET ? one : parts.join('\n');
+}
+// The cover's footer -- speaker, institution and date -- as one run: one face, size, weight and colour for the line.
+function whoRuns(isLight, speaker, institution, date, sep, w) {
+  const parts = whoParts(speaker, institution, date);
+  return parts.length ? [{ text: whoText(parts, w, sep), options: { color: dimC(isLight) } }] : [];
+}
+// The largest size at which each of the who text's lines stays on one line of the box and all of them fit its height;
+// a part too long even at WHO_MIN_FS wraps at the size that fits the box.
+function whoFs(runs, w, h, maxFs = WHO_FS) {
+  const lines = runs[0].text.split('\n'), room = w - 2 * DIV_TEXT_INSET;
+  for (let fs = Math.round(maxFs); fs >= WHO_MIN_FS; fs--) {
+    if (lines.every(t => textW(t, fs, 'body', false) / WRAP_SAFE <= room) && lines.length * fs * LINE / 72 + 0.1 <= h) return fs;   // + 0.05" top and bottom, as fitFontSize
+  }
+  return fitFontSize(runs[0].text, w, h, maxFs, WHO_MIN_FS, 'body', false);
+}
+
+// cover-split -- the title on the theme's background at left under a bold accent kicker; at right a panel in the
+// theme's accent gradient holding the speaker, institution and date in one style, each marked by a dot
+const SPLIT_TEXT_SHARE = 0.56;          // the title's share of the body width
+const SPLIT_PANEL_GAP = 0.45;           // between the title and the panel
+const SPLIT_PANEL_PAD = 0.45;           // the panel's inner margin
+const SPLIT_DOT = 0.12;                 // a row's dot
+const SPLIT_ROW_H = 0.62;               // one meta row
+const SPLIT_ROW_FS = 18;                // its text, one size for every row
 function buildCoverSplit(s) {
   const isLight = !!s.is_light;
   const slide = pptx.addSlide();
   setBg(slide, isLight);
-  addChrome(slide, isLight, s.page_num);
-  const LHS_W = BW * 0.60;
-  const RHS_X = MX + LHS_W + 0.17;
-  const RHS_W = W - RHS_X - MX;
-  // Vertical divider
-  slide.addShape(pptx.ShapeType.rect, {
-    x: MX + LHS_W + 0.06, y: 0.75, w: 0.014, h: H - 1.58,
-    fill: { color: fgC(isLight), transparency: 85 }, line: { type: 'none' },
+  const lw = BW * SPLIT_TEXT_SHARE, px = MX + lw + SPLIT_PANEL_GAP, pw = W - px;
+  const ink = textOn(gradMid());
+  gradRect(slide, px, 0, pw, H, gradStops()[0], gradStops()[1], 'v');
+  cornerRings(slide, W, 0, ink);
+  cornerGlow(slide, W, H, ink);
+  slide.addText(label('lecture', 'Lecture'), { x: MX, y: 0.82, w: lw, h: DIV_KICKER_H, wrap: false, valign: 'middle',
+    color: ACC, fontSize: DIV_KICKER_FS, fontFace: FDISP, bold: true });
+  slide.addShape(pptx.ShapeType.rect, { x: MX + DIV_TEXT_INSET, y: 1.28, w: DIV_BAR_W, h: DIV_BAR_H, fill: { color: ACC }, line: { type: 'none' } });
+  const title = toPlain(manifest.lecture_title || s.title || '');
+  slide.addText(title, { x: MX, y: 1.45, w: lw, h: H - 2.6, fontSize: fitFontSize(title, lw, H - 2.6, 44, 24, 'display'),
+    fontFace: FDISP, color: titleColor(isLight), bold: true, valign: 'middle', wrap: true });
+  const who = whoParts(s.speaker || s.author || manifest.speaker, s.institution || manifest.institution, manifest.date);
+  const rows = s.meta_rows ? s.meta_rows.map(r => r.v || '') : who;
+  const rx = px + SPLIT_PANEL_PAD, rw = W - rx - SPLIT_PANEL_PAD, tw = rw - SPLIT_DOT - 0.15;
+  const top = (H - rows.length * SPLIT_ROW_H) / 2;
+  const rowFs = Math.min(...rows.map(t => fitFontSize(toPlain(t), tw, SPLIT_ROW_H, SPLIT_ROW_FS, WHO_MIN_FS, 'any', false)));
+  rows.forEach((text, i) => {                                       // one size for every row
+    const y = top + i * SPLIT_ROW_H, t = toPlain(text);
+    slide.addShape(pptx.ShapeType.ellipse, { x: rx, y: y + (SPLIT_ROW_H - SPLIT_DOT) / 2, w: SPLIT_DOT, h: SPLIT_DOT,
+      fill: { color: ink }, line: { type: 'none' } });
+    slide.addText(t, { x: rx + SPLIT_DOT + 0.15, y, w: tw, h: SPLIT_ROW_H, valign: 'middle', wrap: true, color: ink,
+      fontFace: FBODY, fontSize: rowFs });
   });
-  // Eyebrow with accent line
-  if (s.eyebrow) {
-    slide.addShape(pptx.ShapeType.rect, {
-      x: MX, y: 0.84, w: 0.46, h: 0.017,
-      fill: { color: ACC }, line: { type: 'none' },
-    });
-    slide.addText(toPlain(s.eyebrow), {
-      x: MX + 0.54, y: 0.75, w: LHS_W - 0.62, h: 0.29,
-      fontSize: 10, fontFace: FMONO, color: dimC(isLight), valign: 'middle', charSpacing: 2,
-    });
-  }
-  // Large title
-  const titleText = toPlain(manifest.lecture_title || s.title || '');
-  const titleFs   = titleText.length > 60 ? 27 : titleText.length > 40 ? 33 : titleText.length > 25 ? 38 : 40;
-  slide.addText(titleText, {
-    x: MX, y: 1.24, w: LHS_W, h: H - 2.63,
-    fontSize: titleFs, fontFace: FDISP, color: fgC(isLight), valign: 'middle', wrap: true,
-  });
-  // Right side: stacked key-value rows
-  const rows  = s.meta_rows || [];
-  const rowH  = Math.min(0.66, (H - 1.88) / Math.max(rows.length, 1));
-  const rowsStartY = H - rows.length * rowH - 0.90;
-  rows.forEach((row, i) => {
-    const ry = rowsStartY + i * rowH;
-    slide.addShape(pptx.ShapeType.rect, {
-      x: RHS_X, y: ry, w: RHS_W, h: 0.014,
-      fill: { color: fgC(isLight), transparency: 85 }, line: { type: 'none' },
-    });
-    slide.addText(toPlain(row.k || ''), {
-      x: RHS_X, y: ry + 0.05, w: RHS_W, h: 0.20,
-      fontSize: 8, fontFace: FMONO, color: dimC(isLight), valign: 'middle', charSpacing: 2,
-    });
-    slide.addText(toPlain(row.v || ''), {
-      x: RHS_X, y: ry + 0.25, w: RHS_W, h: rowH - 0.29,
-      fontSize: 14, fontFace: FDISP, color: fgC(isLight), valign: 'top', wrap: true,
-    });
-  });
-  if (rows.length > 0) {
-    slide.addShape(pptx.ShapeType.rect, {
-      x: RHS_X, y: rowsStartY + rows.length * rowH, w: RHS_W, h: 0.014,
-      fill: { color: fgC(isLight), transparency: 85 }, line: { type: 'none' },
-    });
-  }
-}
-
-// end-with-image — large title + footer on left, image on right
-function buildEndWithImage(s) {
-  const isLight = !!s.is_light;
-  const slide = pptx.addSlide();
-  setBg(slide, isLight);
-  addChrome(slide, isLight, s.page_num);
-  const LHS_W = (BW - 0.15) / 2;
-  const RHS_X = MX + LHS_W + 0.15;
-  const RHS_W = W - RHS_X - MX;
-  // Large end title
-  slide.addText(toPlain(s.title || 'Thank You'), {
-    x: MX, y: 0.83, w: LHS_W, h: 2.89,
-    fontSize: 45, fontFace: FDISP, color: fgC(isLight), valign: 'top', wrap: true,
-  });
-  // Footer separator
-  const footY = CBOT_Y - 0.71;
-  slide.addShape(pptx.ShapeType.rect, {
-    x: MX, y: footY, w: LHS_W, h: 0.014,
-    fill: { color: fgC(isLight), transparency: 80 }, line: { type: 'none' },
-  });
-  const items = s.meta_items || [];
-  items.slice(0, 3).forEach((item, i) => {
-    const iy = footY + 0.08 + i * 0.21;
-    slide.addText(toPlain(item.k || ''), {
-      x: MX, y: iy, w: LHS_W, h: 0.14,
-      fontSize: 7, fontFace: FMONO, color: dimC(isLight), charSpacing: 1.5,
-    });
-    if (item.v) {
-      slide.addText(toPlain(item.v), {
-        x: MX, y: iy + 0.14, w: LHS_W, h: 0.17,
-        fontSize: 11, fontFace: FDISP, color: fgC(isLight),
-      });
-    }
-  });
-  // Image on right (edge to edge vertically)
-  const img = (s.images || [])[0];
-  if (img && fs.existsSync(img)) {
-    addImage(slide, img, RHS_X, 0.26, RHS_W, H - 0.26 - 0.23);
-  } else {
-    slide.addShape(pptx.ShapeType.rect, {
-      x: RHS_X, y: 0.26, w: RHS_W, h: H - 0.49,
-      fill: { color: fgC(isLight), transparency: 92 }, line: { type: 'none' },
-    });
-    slide.addText('Image', {
-      x: RHS_X, y: H / 2 - 0.15, w: RHS_W, h: 0.30,
-      fontSize: 9, fontFace: FMONO, color: dimC(isLight), align: 'center',
-    });
-  }
-}
-
-// end-image-hero — full-bleed image bg + dark gradient overlay + title at bottom
-function buildEndImageHero(s) {
-  const slide = pptx.addSlide();
-  const img = (s.images || [])[0];
-  if (img && fs.existsSync(img)) {
-    slide.background = { path: img };
-  } else {
-    slide.background = { color: BGDARK };
-  }
-  // Bottom-heavy dark overlay
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: H * 0.30, w: W, h: H * 0.70,
-    fill: { color: '000000', transparency: 15 }, line: { type: 'none' },
-  });
-  addChrome(slide, false, s.page_num);
-  // Accent bar
-  slide.addShape(pptx.ShapeType.rect, {
-    x: MX, y: H - 1.99, w: 0.46, h: 0.017,
-    fill: { color: ACC }, line: { type: 'none' },
-  });
-  // Large title
-  const titleText = toPlain(s.title || 'Thank You');
-  const titleFs   = titleText.length > 30 ? 45 : titleText.length > 20 ? 54 : 60;
-  slide.addText(titleText, {
-    x: MX, y: H - 1.88, w: BW, h: 1.20,
-    fontSize: titleFs, fontFace: FDISP, color: 'FFFFFF', valign: 'top', wrap: true,
-  });
-  // Footer separator + items
-  const footY = CBOT_Y - 0.08;
-  slide.addShape(pptx.ShapeType.rect, {
-    x: MX, y: footY, w: BW, h: 0.014,
-    fill: { color: 'FFFFFF', transparency: 80 }, line: { type: 'none' },
-  });
-  const items = s.meta_items || [];
-  if (items.length) {
-    const colW = (BW - 0.30 * (items.length - 1)) / items.length;
-    items.slice(0, 3).forEach((item, i) => {
-      const x = MX + i * (colW + 0.30);
-      slide.addText(toPlain(item.k || ''), {
-        x, y: footY + 0.05, w: colW, h: 0.17,
-        fontSize: 7, fontFace: FMONO, color: 'FFFFFF', transparency: 50, charSpacing: 2,
-      });
-      if (item.v) {
-        slide.addText(toPlain(item.v), {
-          x, y: footY + 0.21, w: colW, h: 0.18,
-          fontSize: 10, fontFace: FDISP, color: 'FFFFFF',
-        });
-      }
-    });
-  }
 }
 
 // editorial-light — light bg, large display title + lede left, sidebar (pull quote / meta) right
@@ -4574,6 +5033,7 @@ for (const s of manifest.slides || []) {
     case 'toc_cards':        buildTocCards(s);          break;
     case 'bullets':          buildBullets(s);           break;
     case 'formula':          buildFormula(s);           break;
+    case 'figasset':         buildFigAsset(s);          break;
     case 'codeside':         buildCodeSide(s);          break;
     case 'codeabove':        buildCodeAbove(s);         break;
     case 'twoimgbelow':      buildTwoImgBelow(s);       break;
@@ -4603,8 +5063,6 @@ for (const s of manifest.slides || []) {
     case 'imgfull':          buildImgFull(s);           break;
     case 'pricing':          buildPricing(s);           break;
     case 'cover_split':      buildCoverSplit(s);        break;
-    case 'end_with_image':   buildEndWithImage(s);      break;
-    case 'end_image_hero':   buildEndImageHero(s);      break;
     case 'editorial':        buildEditorial(s);         break;
     case 'end':              buildEnd(s);               break;
     case 'end_credits':      buildEndCredits(s);        break;

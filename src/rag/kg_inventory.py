@@ -9,10 +9,8 @@ relation the extractor synthesized is kept only when a sentence of the chapter s
 """
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -37,15 +35,6 @@ def is_noise(name: str) -> bool:
     class name (cross_val_score, SGDClassifier) is not noise: whether prose teaches it decides."""
     core = re.sub(r"\W", "", name)
     return len(core) <= 2 or bool(_NUMBER.fullmatch(name.strip())) or bool(_VARIABLE.fullmatch(name.strip()))
-
-
-def _salience(kb_dir) -> Dict[str, float]:
-    """Global PageRank of the KG nodes (salience.json, written at build time); empty when absent."""
-    path = Path(kb_dir) / "salience.json" if kb_dir else None
-    try:
-        return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
-    except (OSError, ValueError):
-        return {}
 
 
 def _heading_nodes(chapter, index: dict) -> List[str]:
@@ -129,11 +118,14 @@ class _Anchor:
 def build_inventory(chapter, store, graph, index: Optional[dict] = None) -> dict:
     """{nodes: {kid: node}, relations: {rid: relation}, noise: [names], api: [names]} for one chapter.
 
-    node = {name, type, description, sentences, via ("name"|"description"), pids, assets, mentions, span, salience,
-    home} (mentions/span/salience/home are signals for the agents, who judge what is key and what is only named in
-    passing);
-    relation = {a, b, kid_a, kid_b, description, sentences, via ("sentence"|"paragraph"|"description")}.
-    Nodes and relations no sentence supports are listed under `ungrounded` for the report, never taught."""
+    node = {name, type, description, sentences, via ("name"|"description"), pids, assets, mentions, span, home}
+    (mentions/span/home are signals for the agents, who judge what is key and what is only named in passing);
+    relation = {a, b, kid_a, kid_b, description, sentences, via ("sentence"|"paragraph"|"description"), keywords, weight,
+    chunks, local}. Nodes and relations no sentence supports are listed under `ungrounded` for the report, never taught;
+    concepts named only on the far side of a chunk's boundary under `elsewhere`. A node's `description` serves to find
+    sentences of the chapter, never as text for an agent: the KB merges it across every document and section. A `local`
+    relation was extracted from one chunk holding this chapter's text, so its description is that chunk's own words and
+    may reach an agent."""
     index = index if index is not None else store.index
     heads = [h for h in _heading_nodes(chapter, index) if graph.has_node(h)]
     names = list(dict.fromkeys(nb for h in heads for nb in graph.neighbors(h)
@@ -141,7 +133,6 @@ def build_inventory(chapter, store, graph, index: Optional[dict] = None) -> dict
     prose = {sid: s["text"] for sid, s in chapter.sentences.items() if s["kind"] == "text"}
     code = [s["text"] for s in chapter.sentences.values() if s["kind"] == "code"]
     anchor = _Anchor(chapter, store)
-    salience = _salience(getattr(store, "kb_dir", None))
     home = _home_index(chapter, index)
     named: Dict[str, List[str]] = {}
     noise, api, pending = [], [], []
@@ -153,11 +144,14 @@ def build_inventory(chapter, store, graph, index: Optional[dict] = None) -> dict
         named[name] = [sid for sid, text in prose.items() if any(p.search(text) for p in patterns)]
         if not named[name]:
             pending.append(name)
+    own = " ".join(s["text"] for s in chapter.sentences.values()) + " " + " ".join(chapter.heading_titles.values())
+    elsewhere = [n for n in pending if _named_elsewhere(n, graph.nodes[n], own, store)]
+    pending = [n for n in pending if n not in elsewhere]
     anchor.prepare([str(graph.nodes[n].get("description") or "") for n in pending])
     nodes: Dict[str, dict] = {}
     ungrounded: List[str] = []
     for name in names:
-        if name in noise:
+        if name in noise or name in elsewhere:
             continue
         data = graph.nodes[name]
         sentences, via = named[name], "name"
@@ -173,20 +167,29 @@ def build_inventory(chapter, store, graph, index: Optional[dict] = None) -> dict
         nodes[name] = {"name": name, "type": clean_type(data.get("entity_type")), "via": via,
                        "description": " ".join(str(data.get("description") or "").split())[:240],
                        "sentences": sentences, "assets": assets, "pids": pids,
-                       "mentions": len(named[name]), "span": len(pids),
-                       "salience": round(float(salience.get(name, 0.0)), 5), "home": home(graph, name)}
+                       "mentions": len(named[name]), "span": len(pids), "home": home(graph, name)}
     relations = _relations(chapter, graph, nodes, anchor, ungrounded)
     kid = {name: f"K{n}" for n, name in enumerate(nodes, 1)}
     return {"nodes": {kid[name]: {**node, "kid": kid[name]} for name, node in nodes.items()},
             "relations": {f"R{n}": {**r, "rid": f"R{n}", "kid_a": kid[r["a"]], "kid_b": kid[r["b"]]}
                           for n, r in enumerate(relations, 1)},
-            "noise": noise, "api": api, "ungrounded": ungrounded}
+            "noise": noise, "api": api, "ungrounded": ungrounded, "elsewhere": elsewhere}
+
+
+def _named_elsewhere(name: str, data: dict, own: str, store) -> bool:
+    """A concept this part never names (in its prose, tables, code, formulas or headings) that its own source chunks do
+    name: a chunk runs across a boundary, and the concept belongs to the part on the other side."""
+    patterns = name_patterns(name)
+    if any(p.search(own) for p in patterns):
+        return False
+    return any(p.search(store.chunk_text(c)) for c in _chunks(data) for p in patterns)
 
 
 def _relations(chapter, graph, nodes: Dict[str, dict], anchor: _Anchor, ungrounded: List[str]) -> List[dict]:
     """Stated relations between two kept nodes, each anchored: a sentence naming both ends, else the sentence of a
-    paragraph naming both closest to the relation's description, else the description anchored in the edge's chunks.
-    Mere co-occurrence is not a relation: two names in one sentence are already covered when that sentence is."""
+    paragraph naming both closest to the relation's description, else the description anchored in the edge's chunks;
+    each with the extractor's keywords and weight, its source chunks and whether it is local (from one chunk of this
+    chapter). Mere co-occurrence is not a relation: two names in one sentence are already covered when that sentence is."""
     stated, seen = [], set()
     for a, b, data in graph.edges(data=True):
         if a not in nodes or b not in nodes or a == b:
@@ -198,10 +201,10 @@ def _relations(chapter, graph, nodes: Dict[str, dict], anchor: _Anchor, unground
         if pair in seen:
             continue
         seen.add(pair)
-        stated.append((a, b, " ".join(str(data.get("description") or "").split()), _chunks(data)))
-    anchor.prepare([d for _, _, d, _ in stated])
+        stated.append((a, b, " ".join(str(data.get("description") or "").split()), _chunks(data), data))
+    anchor.prepare([d for _, _, d, _, _ in stated])
     out = []
-    for a, b, description, chunks in stated:
+    for a, b, description, chunks, data in stated:
         both = [s for s in nodes[a]["sentences"] if s in set(nodes[b]["sentences"])]
         if both:
             ranked = anchor.rank(description, both)
@@ -215,7 +218,14 @@ def _relations(chapter, graph, nodes: Dict[str, dict], anchor: _Anchor, unground
         if not sentences:
             ungrounded.append(f"{a} — {b}")
             continue
-        out.append({"a": a, "b": b, "description": description[:240], "sentences": sentences, "via": via})
+        try:
+            weight = float(data.get("weight") or 0.0)
+        except (TypeError, ValueError):
+            weight = 0.0
+        local = len(chunks) == 1 and bool(anchor.in_chunks(chunks))       # one chunk, and it holds this chapter's text
+        out.append({"a": a, "b": b, "description": description[:240], "sentences": sentences, "via": via,
+                    "keywords": " ".join(str(data.get("keywords") or "").split()), "weight": weight, "chunks": chunks,
+                    "local": local})
     return out
 
 

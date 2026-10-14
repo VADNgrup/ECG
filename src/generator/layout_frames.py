@@ -3,6 +3,7 @@ from the same LAYOUT_PURPOSE that decides which layout a slide gets. The frames 
 in PowerPoint (Layout gallery, Reset); the slides themselves are drawn by deck_pptx_gen.js inside the same regions."""
 from typing import Dict, List
 
+from src.generator import fit_model as fm
 from src.generator import layout_purpose as lp
 
 MX, BW, BODY_Y, BODY_H = 0.5, 9.0, 1.55, 3.55        # deck_pptx_gen.js geometry (inches)
@@ -10,8 +11,7 @@ MX, BW, BODY_Y, BODY_H = 0.5, 9.0, 1.55, 3.55        # deck_pptx_gen.js geometry
 STRUCTURAL: Dict[str, str] = {
     "cover_split_layout": "Cover", "toc_layout": "Contents", "toc_vertical_layout": "Contents vertical",
     "toc_described_layout": "Contents described", "toc_cards_layout": "Contents cards", "agenda_layout": "Agenda",
-    "section_divider_layout": "Section divider", "end_layout": "End", "end_with_image_layout": "End with image",
-    "end_image_hero_layout": "End image hero",
+    "section_divider_layout": "Section divider", "end_layout": "End",
 }
 
 
@@ -54,9 +54,7 @@ def frames_for(layout_id: str) -> List[dict]:
                 "toc_layout": toc, "toc_vertical_layout": toc, "toc_described_layout": toc, "toc_cards_layout": _grid(2, 3, "Entry", "Section title"),
                 "agenda_layout": _rows(5, "Item", "Agenda item", h=3.4),
                 "section_divider_layout": [_f("Section", MX, 2.2, BW, 1.4, "Section heading")],
-                "end_layout": [_f("Closing", MX, 2.4, BW, 1.0, "Closing line")],
-                "end_with_image_layout": [_f("Closing", MX, 2.4, 4.5, 1.0, "Closing line"), _f("Figure", 5.2, 1.0, 4.3, 3.6, "Picture", kind="pic")],
-                "end_image_hero_layout": [_f("Figure", 0, 0, 10, 5.625, "Full-bleed picture", kind="pic")]}.get(layout_id, [])
+                "end_layout": [_f("Closing", MX, 2.4, BW, 1.0, "Closing line")]}.get(layout_id, [])
     r = spec.relation
     if r == "definition":
         return [_f("Definition", MX, BODY_Y, BW, BODY_H, "Term and its formal definition")]
@@ -115,6 +113,12 @@ def frames_for(layout_id: str) -> List[dict]:
                 _f("Explanation", MX, BODY_Y + 1.35, BW, BODY_H - 1.35, "What each part means")]
     if r in ("table", "source_table", "table_only", "table_callout", "table_takeaway"):
         return [_f("Table", MX, BODY_Y, BW, 2.4, "Table", kind="pic"), _f("Notes", MX, BODY_Y + 2.55, BW, BODY_H - 2.55, "Key takeaway")]
+    if r == "figure_asset":
+        half, row = (BW - fm.FIG_ASSET_GAP) / 2, BODY_H * fm.FIG_ASSET_ROW_SHARES[0]
+        return [_f("Figure", MX, BODY_Y, half, row, "Picture", kind="pic"),
+                _f("Asset", MX + half + fm.FIG_ASSET_GAP, BODY_Y, half, row, "Equation or table", kind="pic"),
+                _f("Text", MX, BODY_Y + row + fm.FIG_ASSET_TEXT_GAP, BW, BODY_H - row - fm.FIG_ASSET_TEXT_GAP,
+                   "Explanation")]
     if r in ("figures", "visual_comparison"):
         return _cols(2, "Figure", "Picture", h=2.6, y=BODY_Y) + [_f("Text", MX, BODY_Y + 2.75, BW, BODY_H - 2.75, "Explanation")]
     if r == "code_walkthrough":

@@ -1,6 +1,22 @@
 from pathlib import Path
 
-import fitz
+import pymupdf
+
+
+def trimmed_toc(toc: list, start: int, end: int) -> list:
+    """The outline entries on pages [start, end] (0-based), page-shifted, each one level below its nearest kept
+    ancestor: an entry whose ancestors fall outside the range becomes top-level, and its siblings stay its siblings."""
+    out, stack = [], []                      # stack: (source level, kept?, new level) of the current ancestors
+    for lvl, title, page in toc:
+        while stack and stack[-1][0] >= lvl:
+            stack.pop()
+        kept = start + 1 <= page <= end + 1
+        parent = next((new for _, k, new in reversed(stack) if k), 0)
+        new = parent + 1
+        stack.append((lvl, kept, new))
+        if kept:
+            out.append([new, title, page - start])
+    return out
 
 
 def trim_pdf_to_pages(src_path: Path, start: int, end: int, out_dir: Path) -> Path:
@@ -17,29 +33,18 @@ def trim_pdf_to_pages(src_path: Path, start: int, end: int, out_dir: Path) -> Pa
     if out_path.exists():
         return out_path
 
-    src_doc = fitz.open(src_path)
+    src_doc = pymupdf.open(src_path)
     try:
         if not (0 <= start <= end < src_doc.page_count):
             raise ValueError(
                 f'Page range {start}-{end} out of bounds for {src_path.name} '
                 f'({src_doc.page_count} pages, 0-based)')
-        trimmed = fitz.open()
+        trimmed = pymupdf.open()
         trimmed.insert_pdf(src_doc, from_page=start, to_page=end)
         trimmed.set_metadata(dict(src_doc.metadata or {}))      # keeps the book's title for the deck
         # insert_pdf() drops the outline; re-derive it from entries within [start,end], page-shifted.
-        src_toc = src_doc.get_toc()  # list of [level, title, page_1based]
-        kept = [[lvl, title, page - start]
-                for lvl, title, page in src_toc if start + 1 <= page <= end + 1]
-        if kept:
-            # set_toc requires entry 0 at level 1 and no level jumping >1 deeper than its predecessor;
-            # shift every level so the minimum becomes 1, then clamp to enforce the step-down-by-1 rule.
-            min_lvl = min(lvl for lvl, _, _ in kept)
-            remapped, prev_lvl = [], 0
-            for lvl, title, page in kept:
-                norm = max(1, lvl - min_lvl + 1)
-                norm = min(norm, prev_lvl + 1)
-                remapped.append([norm, title, page])
-                prev_lvl = norm
+        remapped = trimmed_toc(src_doc.get_toc(), start, end)
+        if remapped:
             trimmed.set_toc(remapped)
         trimmed.save(out_path)
         trimmed.close()

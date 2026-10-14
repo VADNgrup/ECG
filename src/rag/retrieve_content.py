@@ -171,6 +171,38 @@ def find_heading_id(structural_index: dict, title: str) -> int | None:
     return int(keyed[key]) if key is not None else None
 
 
+_NTH_TITLE = re.compile(r"^(.*\S)\s+#(\d+)$")     # a path step naming a later heading of the same title
+
+
+def same_title(structural_index: dict, title: str, among: set | None = None) -> list[int]:
+    """Headings titled exactly so (case and spacing aside), in reading order; `among`: only those heading ids."""
+    headings = structural_index.get("headings") or {}
+    key = " ".join(title.split()).casefold()
+    return sorted((int(k) for k, h in headings.items() if (among is None or int(k) in among)
+                   and " ".join(str(h.get("title") or "").split()).casefold() == key),
+                  key=lambda k: headings[str(k)].get("order", 0))
+
+
+def find_heading_path(structural_index: dict, path: str, sep: str = " > ") -> int | None:
+    """The heading a path of titles names ("Document > Chapter"), each step among the headings under the one before (so
+    a title several documents share names the right section); "Title #2" is the second heading of that exact title
+    there. A step no heading is titled exactly takes the closest title (`find_heading_id`)."""
+    headings = structural_index.get("headings") or {}
+    hid, under = None, None
+    for name in (p.strip() for p in path.split(sep) if p.strip()):
+        nth = _NTH_TITLE.match(name)
+        exact = same_title(structural_index, nth.group(1) if nth else name, under)
+        at = int(nth.group(2)) - 1 if nth else 0
+        if at < len(exact):
+            hid = exact[at]
+        else:
+            hid = find_heading_id({"headings": {k: h for k, h in headings.items() if under is None or int(k) in under}}, name)
+        if hid is None:
+            return None
+        under = subtree_ids(structural_index, hid) - {hid}
+    return hid
+
+
 def subtree_ids(structural_index: dict, root_id: int) -> set[int]:
     headings = structural_index.get("headings") or {}
     children: dict[int, list[int]] = {}
@@ -189,11 +221,16 @@ def subtree_ids(structural_index: dict, root_id: int) -> set[int]:
     return out
 
 
+def root_ids_of(structural_index: dict, root_id: int) -> set[int]:
+    """The headings of one deck root: its subtree; the document's title only its own text, its sections being roots too."""
+    return {root_id} if root_id == int(structural_index.get("title_id", -1)) else subtree_ids(structural_index, root_id)
+
+
 def scope_ids(structural_index: dict, root_ids: list[int]) -> set[int]:
-    """Union of the subtrees below every selected root heading (the deck's scope)."""
+    """The headings of every selected root (the deck's scope)."""
     out: set[int] = set()
     for root in root_ids:
-        out |= subtree_ids(structural_index, int(root))
+        out |= root_ids_of(structural_index, int(root))
     return out
 
 
@@ -303,10 +340,3 @@ def load_kg_graph(kb_dir: Path):
     validate_graph_schema(graph)
     return graph
 
-
-def compute_salience(graph) -> dict:
-    """Global node importance -- PageRank, degree fallback."""
-    try:
-        return nx.pagerank(graph) if graph.number_of_nodes() else {}
-    except Exception:
-        return {n: float(graph.degree(n) or 0) for n in graph.nodes}

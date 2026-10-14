@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import List
 
-import fitz
+import pymupdf
 
 from src.utils.content_cache import cached_json, digest
 from src.utils.llm import chat, parse_json_reply
@@ -29,7 +29,7 @@ def book_title(source_file: str) -> str:
     for candidate in candidates:
         try:
             if candidate.suffix.lower() == ".pdf" and candidate.is_file():
-                title = " ".join(str((fitz.open(candidate).metadata or {}).get("title") or "").split())
+                title = " ".join(str((pymupdf.open(candidate).metadata or {}).get("title") or "").split())
                 if title:
                     return title
         except Exception:

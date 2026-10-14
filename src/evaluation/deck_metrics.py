@@ -12,12 +12,12 @@ import numpy as np
 
 from src.rag.embedder import Embedder
 from src.rag.evidence_store import _informative, EvidenceStore
-from src.rag.retrieve_content import find_heading_id, load_structural_index
+from src.rag.retrieve_content import load_structural_index
 from src.utils import lang
 from src.utils.bullet_text import has_crossref, support_ratio
 from src.utils.config import Config
 from src.workflow.coverage import build_checklist, coverage_rate, presence, used_sentence_ids
-from src.workflow.scope import clean_display_title, find_kb_dir
+from src.workflow.scope import clean_display_title, find_kb_dir, ScopeOrchestrator
 
 
 def _quantiles(values: List[float]) -> Dict[str, float]:
@@ -55,8 +55,9 @@ def measure(lecture_dir: Path, embed_backend: str = None) -> Dict:
     meta = lecture["metadata"]
     kb_dir = find_kb_dir(meta["source_document_id"])
     index = load_structural_index(kb_dir)
-    roots = [find_heading_id(index, t.strip()) for t in str(meta.get("root_heading") or "").split(";") if t.strip()]
-    store = EvidenceStore(kb_dir, [r for r in roots if r is not None], Embedder(backend=embed_backend, cache_dir=kb_dir))
+    scope = ScopeOrchestrator(index, kb_dir)
+    roots = scope.resolve_roots(meta.get("root_heading"), lambda _: True) if meta.get("root_heading") else []
+    store = EvidenceStore(kb_dir, roots, Embedder(backend=embed_backend, cache_dir=kb_dir))
     slides = lecture["slides"]
 
     bullets, supports, completes, lexical, ratios, leaks, crossrefs = [], [], [], [], [], 0, 0

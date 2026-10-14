@@ -47,36 +47,6 @@ Format the content-level key words as ("content_keywords"{tuple_delimiter}<high_
 ######################
 Example 1:
 
-Entity_types: [concept, metric, code, dataset]
-Text:
-Gradient Descent is an optimization algorithm that iteratively adjusts a model's parameters in the direction of the negative gradient of a loss function to minimize error. The size of each step is controlled by the learning rate; if it is set too high the algorithm may diverge, and if too low, convergence is slow. Stochastic Gradient Descent (SGD) approximates the gradient from a single training example (or a small mini-batch), trading exactness for speed.
-################
-Output:
-("entity"{tuple_delimiter}"Gradient Descent"{tuple_delimiter}"concept"{tuple_delimiter}"An optimization algorithm that iteratively adjusts model parameters along the negative gradient of a loss function to minimize error."){record_delimiter}
-("entity"{tuple_delimiter}"Loss Function"{tuple_delimiter}"concept"{tuple_delimiter}"A function measuring model error that Gradient Descent seeks to minimize."){record_delimiter}
-("entity"{tuple_delimiter}"Learning Rate"{tuple_delimiter}"concept"{tuple_delimiter}"A hyperparameter controlling the step size of Gradient Descent; too high diverges, too low converges slowly."){record_delimiter}
-("entity"{tuple_delimiter}"Stochastic Gradient Descent (SGD)"{tuple_delimiter}"concept"{tuple_delimiter}"A variant of Gradient Descent that estimates the gradient from a single example or mini-batch, trading exactness for speed."){record_delimiter}
-("relationship"{tuple_delimiter}"Gradient Descent"{tuple_delimiter}"Loss Function"{tuple_delimiter}"Gradient Descent minimizes the loss function by following its negative gradient."{tuple_delimiter}"optimization, minimization"{tuple_delimiter}9){record_delimiter}
-("relationship"{tuple_delimiter}"Gradient Descent"{tuple_delimiter}"Learning Rate"{tuple_delimiter}"The learning rate sets the step size Gradient Descent takes each iteration."{tuple_delimiter}"hyperparameter, step size"{tuple_delimiter}8){record_delimiter}
-("relationship"{tuple_delimiter}"Stochastic Gradient Descent (SGD)"{tuple_delimiter}"Gradient Descent"{tuple_delimiter}"SGD is a variant of Gradient Descent using sampled gradients."{tuple_delimiter}"variant, approximation"{tuple_delimiter}8){record_delimiter}
-("content_keywords"{tuple_delimiter}"optimization, gradient descent, learning rate, convergence"){completion_delimiter}
-#############################
-Example 2:
-
-Entity_types: [concept, metric, code, dataset]
-Text:
-Precision and Recall are metrics used to evaluate a classifier. Precision is the fraction of predicted positives that are correct, while Recall is the fraction of actual positives that were retrieved. The F1 score is the harmonic mean of Precision and Recall, giving a single balanced measure.
-################
-Output:
-("entity"{tuple_delimiter}"Precision"{tuple_delimiter}"metric"{tuple_delimiter}"The fraction of predicted positive cases that are correct; a classifier evaluation metric."){record_delimiter}
-("entity"{tuple_delimiter}"Recall"{tuple_delimiter}"metric"{tuple_delimiter}"The fraction of actual positive cases that the classifier retrieved."){record_delimiter}
-("entity"{tuple_delimiter}"F1 Score"{tuple_delimiter}"metric"{tuple_delimiter}"The harmonic mean of Precision and Recall, giving a single balanced evaluation measure."){record_delimiter}
-("relationship"{tuple_delimiter}"F1 Score"{tuple_delimiter}"Precision"{tuple_delimiter}"The F1 score is computed as the harmonic mean of Precision and Recall."{tuple_delimiter}"evaluation, harmonic mean"{tuple_delimiter}9){record_delimiter}
-("relationship"{tuple_delimiter}"F1 Score"{tuple_delimiter}"Recall"{tuple_delimiter}"The F1 score is computed as the harmonic mean of Precision and Recall."{tuple_delimiter}"evaluation, harmonic mean"{tuple_delimiter}9){record_delimiter}
-("content_keywords"{tuple_delimiter}"evaluation metrics, precision, recall, classification"){completion_delimiter}
-#############################
-Example 3:
-
 Entity_types: [concept, person, metric, code]
 Text:
 Overfitting is loosely defined as a model performing well on the data it was trained on but poorly on new data. Here is a more precise definition: a model overfits when it captures noise in the training data as if it were a real pattern, so it fails to generalize.

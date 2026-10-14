@@ -1,0 +1,555 @@
+<title>Knowledge Graph</title>
+<div id="tools">
+  <button id="sbBtn" title="Sections and node list">☰</button>
+  <div id="sw"><input id="q" placeholder="Search nodes…" autocomplete="off" spellcheck="false"><div id="qr" hidden></div></div>
+  <button id="fit" title="Fit the visible graph to the screen">⤢ Fit</button>
+  <button id="reset" title="Put dragged nodes back">↺ Layout</button>
+  <button id="fBtn" title="Filters">⚲ Filters</button>
+  <button id="theme" title="Light / dark">🌙</button>
+  <span id="meta"></span>
+</div>
+<aside id="sb">
+  <div class="tabs"><button data-tab="sec" class="on">Sections</button><button data-tab="list">Nodes</button></div>
+  <div id="tab-sec" class="tab">
+    <div class="bar"><input id="tq" placeholder="Find a section…" spellcheck="false">
+      <span class="ctl" id="secAll">show all</span></div>
+    <div class="hint">Tick sections to show only them (with what they contain). Click a title to go there.</div>
+    <div id="tree"></div>
+  </div>
+  <div id="tab-list" class="tab" hidden>
+    <div class="bar"><input id="lq" placeholder="Filter the list…" spellcheck="false"></div>
+    <div id="lh" class="lrow head">
+      <span data-k="l">Name</span><span data-k="t">Type</span><span data-k="g">Deg</span><span data-k="o">Order</span>
+    </div>
+    <div id="vl"><div id="vs"></div></div>
+  </div>
+</aside>
+<aside id="filters">
+  <div class="lh"><span>Node types</span><span><span class="ctl" data-ty="all">all</span> · <span class="ctl" data-ty="none">none</span></span></div>
+  <div id="types"></div>
+  <div class="lh">Relations</div>
+  <div id="kinds"></div>
+  <div class="lh">Degree ≥ <b id="degV">0</b></div>
+  <input id="deg" type="range" min="0" value="0">
+  <label class="chk"><input type="checkbox" id="iso"> Hide nodes with no shown relation</label>
+  <div class="lh">Colour by</div>
+  <select id="colorBy"><option value="type">Node type</option><option value="doc">Document / part</option></select>
+</aside>
+<canvas id="c"></canvas>
+<div id="tip"></div>
+<aside id="panel" hidden></aside>
+<style>
+  :root{--bg:#f7f6f3;--fg:#1c1b19;--muted:#6b6b6b;--panel:rgba(255,255,255,.82);--panel-bd:rgba(20,20,20,.12);--accent:#3a6ea5;--card:#fffffff2;--frame:rgba(20,20,20,.10);
+    --e0:#5a6f8c;--e1:#9a9a9a;--e2:#b07aa1;--e3:#e07b39;}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1117;--fg:#e8e8e8;--muted:#9aa0a6;--panel:rgba(23,26,33,.85);--panel-bd:rgba(255,255,255,.12);--accent:#7fd1ff;--card:#171a21f2;--frame:rgba(255,255,255,.10);
+    --e0:#8fa8c8;--e1:#7c7c7c;--e2:#c99bbb;--e3:#f0a060;}}
+  :root[data-theme="dark"]{--bg:#0f1117;--fg:#e8e8e8;--muted:#9aa0a6;--panel:rgba(23,26,33,.85);--panel-bd:rgba(255,255,255,.12);--accent:#7fd1ff;--card:#171a21f2;--frame:rgba(255,255,255,.10);
+    --e0:#8fa8c8;--e1:#7c7c7c;--e2:#c99bbb;--e3:#f0a060;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;overflow:hidden;font-size:13px}
+  #c{display:block;position:fixed;inset:0;width:100vw;height:100vh;cursor:grab}
+  #tools,#sb,#filters,#panel{position:fixed;z-index:3;background:var(--panel);border:1px solid var(--panel-bd);border-radius:10px;backdrop-filter:blur(6px)}
+  #tools{top:10px;left:10px;right:10px;display:flex;align-items:center;gap:6px;padding:6px 8px;flex-wrap:wrap}
+  button,select,input{font:inherit;color:var(--fg)}
+  #tools button{background:transparent;border:1px solid var(--panel-bd);border-radius:7px;padding:3px 9px;cursor:pointer}
+  #tools button:hover,#tools button.on{background:var(--panel-bd)}
+  #meta{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #meta b{color:var(--accent)}
+  #sw{position:relative;flex:0 1 340px;min-width:140px}
+  #q,#tq,#lq{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--panel-bd);border-radius:7px;padding:4px 8px}
+  #qr{position:absolute;top:30px;left:0;right:0;max-height:60vh;overflow:auto;background:var(--card);border:1px solid var(--panel-bd);border-radius:8px;box-shadow:0 10px 30px #0004}
+  #qr .r{padding:4px 8px;cursor:pointer;display:flex;gap:7px;align-items:center}
+  #qr .r.on,#qr .r:hover{background:var(--panel-bd)}
+  #qr .r small,#qr .note{color:var(--muted)}
+  #qr .note{padding:4px 8px;font-size:12px}
+  #sb{top:58px;left:10px;bottom:10px;width:330px;display:flex;flex-direction:column;padding:8px}
+  #sb[hidden],#filters[hidden]{display:none}
+  .tabs{display:flex;gap:4px;margin-bottom:6px}
+  .tabs button{flex:1;background:transparent;border:1px solid var(--panel-bd);border-radius:7px;padding:4px;cursor:pointer}
+  .tabs button.on{background:var(--panel-bd);font-weight:600}
+  .tab{display:flex;flex-direction:column;min-height:0;flex:1}
+  .tab[hidden]{display:none}
+  .bar{display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--muted)}
+  .hint{color:var(--muted);font-size:11px;margin:2px 0 6px}
+  .ctl{cursor:pointer;color:var(--accent);user-select:none;white-space:nowrap}
+  .ctl:hover{text-decoration:underline}
+  #tree{overflow:auto;flex:1;min-height:0}
+  .tr{display:flex;align-items:center;gap:4px;padding:2px 2px;border-radius:5px;white-space:nowrap}
+  .tr:hover{background:var(--panel-bd)}
+  .tr .cr{width:14px;flex:0 0 14px;text-align:center;cursor:pointer;color:var(--muted);user-select:none}
+  .tr .tt{flex:1;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .tr .n{color:var(--muted);font-variant-numeric:tabular-nums;font-size:11px}
+  .tr input{margin:0}
+  .tr.inh .tt{color:var(--muted)}
+  .lrow{display:grid;grid-template-columns:1fr 70px 38px 46px;gap:6px;align-items:center;padding:0 4px;height:24px;box-sizing:border-box}
+  .lrow.head{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--panel-bd)}
+  .lrow.head span{cursor:pointer;user-select:none}
+  .lrow.head span.on{color:var(--accent)}
+  .lrow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lrow .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  #vl{flex:1;min-height:0;overflow:auto;position:relative}
+  #vs{position:relative}
+  #vs .lrow{position:absolute;left:0;right:0;cursor:pointer;border-radius:5px}
+  #vs .lrow:hover,#vs .lrow.sel{background:var(--panel-bd)}
+  .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;display:inline-block;vertical-align:middle;margin-right:5px}
+  #filters{top:58px;right:10px;width:240px;max-height:calc(100vh - 80px);overflow:auto;padding:8px 11px;font-size:12px}
+  #filters .lh{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:9px 0 4px;display:flex;justify-content:space-between;gap:8px}
+  #filters .lh:first-child{margin-top:0}
+  #filters .sub{font-size:10px;color:var(--muted);margin:5px 0 2px;text-transform:uppercase;letter-spacing:.05em}
+  .row{display:flex;align-items:center;gap:7px;margin:1px 0;cursor:pointer;user-select:none;border-radius:6px;padding:2px 4px}
+  .row:hover{background:var(--panel-bd)}
+  .row.off{opacity:.4}
+  .row .only{font-size:9px;color:var(--accent);opacity:0;text-transform:uppercase}
+  .row:hover .only{opacity:.9}
+  .row .cnt{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  .row .ln{width:16px;height:3px;border-radius:2px;flex:0 0 auto}
+  #deg{width:100%;accent-color:var(--accent)}
+  .chk{display:flex;gap:6px;align-items:center;margin-top:4px;color:var(--muted)}
+  #colorBy{width:100%;background:var(--bg);border:1px solid var(--panel-bd);border-radius:6px;padding:3px}
+  #tip{position:fixed;pointer-events:none;z-index:5;max-width:360px;background:#0b0b0dea;color:#f3f3f3;padding:8px 10px;border-radius:9px;font-size:12px;line-height:1.45;display:none;border:1px solid #ffffff22}
+  #tip b{color:#7fd1ff}
+  #panel{right:10px;bottom:10px;width:360px;max-width:44vw;max-height:52vh;overflow:auto;background:var(--card);padding:12px 14px;box-shadow:0 10px 40px #0005;line-height:1.5}
+  #panel .x{position:absolute;top:8px;right:10px;cursor:pointer;color:var(--muted);font-size:16px}
+  #panel h2{margin:0 22px 4px 0;font-size:15px;word-break:break-word}
+  #panel .sub{color:var(--muted);font-size:12px;margin-bottom:6px}
+  #panel .path{font-size:12px;margin-bottom:6px}
+  #panel .path .ctl{white-space:normal}
+  #panel .desc{white-space:pre-wrap;word-break:break-word;margin:6px 0 8px;max-height:20vh;overflow:auto}
+  #panel .nbh{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:8px 0 3px;display:flex;justify-content:space-between;align-items:center}
+  #panel .nbh select{font-size:11px;background:var(--bg);border:1px solid var(--panel-bd);border-radius:5px;text-transform:none}
+  #panel .nb{display:flex;align-items:center;gap:6px;padding:2px 5px;border-radius:6px;cursor:pointer}
+  #panel .nb:hover{background:var(--panel-bd)}
+  #panel .nb .lbl{flex:1 1 auto;word-break:break-word}
+  #panel .nb .rel{color:var(--muted);font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #panel .more{color:var(--muted);font-size:11px;padding-left:5px}
+</style>
+<script>
+const DATA = /*DATA*/;
+// ── tuning (screen pixels unless noted) ─────────────────────────────────
+const NODE_R_MIN=3, NODE_R_SPAN=9;   // node radius (world units) = min + span * sqrt(degree / max degree)
+const DOT_PX=2.5;                    // below this on-screen radius a node is drawn as a square (cheaper than an arc)
+const LABEL_MIN_PX=6;                // a node is labelled once its on-screen radius reaches this
+const LABEL_MAX=300;                 // at most this many node labels a frame (highest degree first)
+const LABEL_CHARS=32;                // label length on the canvas
+const CELL_TITLE_MIN_PX=70;          // a document / part frame shows its title once it is this wide on screen
+const EDGE_LOD_MAX=2500;             // while panning/zooming, more shown relations than this are drawn after motion stops
+const SETTLE_MS=120;                 // the pause after which a pan/zoom counts as stopped
+const GRID_CELL=40;                  // hit-test grid cell (world units; larger than the largest node)
+const HIT_PAD_PX=3;                  // extra pick radius around a node
+const FIT_PAD_PX=40;                 // margin left around the graph by Fit
+const ZOOM_STEP=1.15, ZOOM_MIN=0.01, ZOOM_MAX=40;
+const ROW_H=24;                      // node list row height
+const SEARCH_MAX=50;                 // search results listed
+const NB_MAX=80;                     // related nodes listed per group in the detail panel
+const HASH_MS=300;                   // URL state written this long after the last change
+const KIND_ALPHA=[0.5,0.15,0.4,0.35];   // relation alpha by kind (structure, mentions, asset, relation)
+const KIND_LABEL={structure:'Section tree',mentions:'Section mentions',asset:'Assets',relation:'Relations'};
+const KIND_LABEL_NB={structure:'Sections',mentions:'Mentions',asset:'Assets',relation:'Relations'};
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cv=$('c'), ctx=cv.getContext('2d'), tip=$('tip'), panel=$('panel');
+const N=DATA.nodes, E=DATA.edges, COL=DATA.colors, KINDS=DATA.kinds, TREE=DATA.tree, CELLS=DATA.cells, PAL=DATA.palette;
+let W=0,H=0,DPR=1;
+
+// ── derived data ────────────────────────────────────────────────────────
+const maxDeg=Math.max(1,...N.map(n=>n.g));
+N.forEach((n,i)=>{n.i=i;n.x0=n.x;n.y0=n.y;n.r=NODE_R_MIN+NODE_R_SPAN*Math.sqrt(n.g/maxDeg);n.lo=n.l.toLowerCase();});
+const byId=new Map(N.map(n=>[n.id,n]));
+const adj=N.map(()=>[]);
+E.forEach((e,ei)=>{adj[e.a].push(ei);adj[e.b].push(ei);});
+const kids=new Map(), treeBy=new Map();
+TREE.forEach(t=>{treeBy.set(t.h,t);if(!kids.has(t.p))kids.set(t.p,[]);kids.get(t.p).push(t.h);});
+const headNode=new Map();                       // heading id -> its node
+N.forEach(n=>{if(n.lv!=null&&n.s!=null&&!headNode.has(n.s))headNode.set(n.s,n);});
+const typeCount={};N.forEach(n=>typeCount[n.t]=(typeCount[n.t]||0)+1);
+const kindCount=KINDS.map(()=>0);E.forEach(e=>kindCount[e.k]++);
+const cellTitle=c=>c.title||(c.hid==null?'(not in a section)':'');
+
+// ── state (kept in the URL hash) ────────────────────────────────────────
+const S={typesOff:new Set(),kindsOff:new Set(),minDeg:0,iso:false,secs:new Set(),colorBy:'type',sel:null,
+         sort:{k:'o',d:1},tab:'sec',sb:true,filters:true};
+function readHash(){
+  try{
+    const h=new URLSearchParams(location.hash.slice(1));
+    const list=k=>(h.get(k)||'').split('|').filter(Boolean);
+    list('t').forEach(t=>S.typesOff.add(t));
+    list('k').forEach(k=>S.kindsOff.add(+k));
+    list('s').forEach(s=>S.secs.add(+s));
+    S.minDeg=+(h.get('d')||0); S.iso=h.get('i')==='1'; S.colorBy=h.get('c')||'type';
+    const sel=h.get('n'); if(sel&&byId.has(sel))S.sel=byId.get(sel).i;
+  }catch(e){}
+}
+let hashTimer=0;
+function writeHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(()=>{
+    const h=new URLSearchParams();
+    if(S.typesOff.size)h.set('t',[...S.typesOff].join('|'));
+    if(S.kindsOff.size)h.set('k',[...S.kindsOff].join('|'));
+    if(S.secs.size)h.set('s',[...S.secs].join('|'));
+    if(S.minDeg)h.set('d',S.minDeg);
+    if(S.iso)h.set('i','1');
+    if(S.colorBy!=='type')h.set('c',S.colorBy);
+    if(S.sel!=null)h.set('n',N[S.sel].id);
+    try{history.replaceState(null,'','#'+h.toString());}catch(e){}
+  },HASH_MS);
+}
+
+// ── filtering: which nodes and relations are shown ──────────────────────
+let visN=[], visE=[], on=new Uint8Array(N.length), eon=new Uint8Array(E.length), cellOn=new Uint32Array(CELLS.length);
+let grid=new Map();
+function subtreeOf(set){
+  const out=new Set(), stack=[...set];
+  while(stack.length){const h=stack.pop();if(out.has(h))continue;out.add(h);(kids.get(h)||[]).forEach(k=>stack.push(k));}
+  return out;
+}
+function recompute(){
+  const allowed=S.secs.size?subtreeOf(S.secs):null;
+  for(const n of N){
+    on[n.i]=(!S.typesOff.has(n.t)&&n.g>=S.minDeg&&(!allowed||(n.s!=null&&allowed.has(n.s))))?1:0;
+  }
+  const shownDeg=new Uint32Array(N.length);
+  E.forEach((e,i)=>{const v=on[e.a]&&on[e.b]&&!S.kindsOff.has(e.k);eon[i]=v?1:0;if(v){shownDeg[e.a]++;shownDeg[e.b]++;}});
+  if(S.iso){
+    N.forEach(n=>{if(on[n.i]&&!shownDeg[n.i])on[n.i]=0;});
+  }
+  visN=[];for(const n of N)if(on[n.i])visN.push(n.i);
+  visN.sort((a,b)=>N[b].g-N[a].g);
+  visE=[];E.forEach((e,i)=>{if(eon[i])visE.push(i);});
+  cellOn.fill(0);visN.forEach(i=>{const c=N[i].c;if(c>=0)cellOn[c]++;});
+  buildGrid();
+  $('meta').innerHTML=`<b>${visN.length}</b> / ${N.length} nodes · <b>${visE.length}</b> / ${E.length} relations`;
+  if(S.sel!=null&&!on[S.sel])select(null);
+  refreshList();renderTypes();renderKinds();writeHash();dirty();
+}
+function buildGrid(){
+  grid=new Map();
+  for(const i of visN){const n=N[i],k=Math.floor(n.x/GRID_CELL)+','+Math.floor(n.y/GRID_CELL);
+    let b=grid.get(k);if(!b)grid.set(k,b=[]);b.push(i);}
+}
+
+// ── view + drawing (only when something changed) ────────────────────────
+const view={x:0,y:0,k:1};
+let pending=false, moving=false, settleTimer=0, TH={};
+function readTheme(){
+  const cs=getComputedStyle(document.documentElement);
+  const v=k=>cs.getPropertyValue(k).trim();
+  TH={fg:v('--fg'),muted:v('--muted'),accent:v('--accent'),frame:v('--frame'),bg:v('--bg'),e:[v('--e0'),v('--e1'),v('--e2'),v('--e3')]};
+}
+function dirty(){if(!pending){pending=true;requestAnimationFrame(draw);}}
+function motion(){moving=true;clearTimeout(settleTimer);settleTimer=setTimeout(()=>{moving=false;dirty();},SETTLE_MS);dirty();}
+function resize(){DPR=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;dirty();}
+function nodeColor(n){
+  if(S.colorBy==='doc')return n.c>=0?PAL[n.c%PAL.length]:'#9a9a9a';
+  return n.col||COL[n.t]||'#9a9a9a';
+}
+let hl=null;                                   // the selected node and its neighbours
+function draw(){
+  pending=false;
+  const k=view.k;
+  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);
+  const x0=-view.x/k, y0=-view.y/k, x1=(W-view.x)/k, y1=(H-view.y)/k;
+  ctx.setTransform(DPR*k,0,0,DPR*k,DPR*view.x,DPR*view.y);
+  // document / part frames
+  ctx.lineWidth=1/k;ctx.strokeStyle=TH.frame;
+  CELLS.forEach((c,ci)=>{if(!cellOn[ci])return;if(c.x>x1||c.y>y1||c.x+c.w<x0||c.y+c.h<y0)return;ctx.strokeRect(c.x,c.y,c.w,c.h);});
+  // relations, a few strokes per kind
+  const sel=S.sel;
+  if(!(moving&&visE.length>EDGE_LOD_MAX)){
+    ctx.lineWidth=0.8/k;
+    for(let kind=0;kind<KINDS.length;kind++){
+      if(S.kindsOff.has(kind))continue;
+      ctx.beginPath();let any=false;
+      for(const ei of visE){const e=E[ei];if(e.k!==kind)continue;
+        if(sel!=null&&(e.a===sel||e.b===sel))continue;
+        const a=N[e.a],b=N[e.b];
+        if((a.x<x0&&b.x<x0)||(a.x>x1&&b.x>x1)||(a.y<y0&&b.y<y0)||(a.y>y1&&b.y>y1))continue;
+        ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);any=true;}
+      if(any){ctx.globalAlpha=KIND_ALPHA[kind]*(sel!=null?0.2:1);ctx.strokeStyle=TH.e[kind];ctx.stroke();}
+    }
+    if(sel!=null){ctx.beginPath();ctx.lineWidth=1.6/k;
+      for(const ei of adj[sel]){if(!eon[ei])continue;const e=E[ei],a=N[e.a],b=N[e.b];ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}
+      ctx.globalAlpha=0.9;ctx.strokeStyle=TH.accent;ctx.stroke();}
+  }
+  // nodes, one fill per colour
+  const buckets=new Map();
+  for(const i of visN){const n=N[i];
+    if(n.x+n.r<x0||n.x-n.r>x1||n.y+n.r<y0||n.y-n.r>y1)continue;
+    const dim=hl&&!hl.has(i)?1:0, key=nodeColor(n)+'|'+dim;
+    let b=buckets.get(key);if(!b)buckets.set(key,b=[]);b.push(n);}
+  for(const [key,list] of buckets){
+    const [color,dim]=key.split('|');ctx.globalAlpha=dim==='1'?0.18:1;ctx.fillStyle=color;ctx.beginPath();
+    for(const n of list){
+      if(n.r*k<DOT_PX)ctx.rect(n.x-n.r,n.y-n.r,2*n.r,2*n.r);
+      else{ctx.moveTo(n.x+n.r,n.y);ctx.arc(n.x,n.y,n.r,0,2*Math.PI);}
+    }
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  if(sel!=null){const n=N[sel];ctx.beginPath();ctx.arc(n.x,n.y,n.r+2/k,0,2*Math.PI);ctx.lineWidth=2.5/k;ctx.strokeStyle=TH.accent;ctx.stroke();}
+  // text in screen pixels
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.textBaseline='top';ctx.font='600 12px system-ui';ctx.fillStyle=TH.muted;
+  CELLS.forEach((c,ci)=>{if(!cellOn[ci])return;const w=c.w*k;if(w<CELL_TITLE_MIN_PX)return;
+    const sx=c.x*k+view.x, sy=c.y*k+view.y;if(sx>W||sy>H||sx+w<0||sy+c.h*k<0)return;
+    let t=cellTitle(c);const maxCh=Math.max(4,Math.floor((w-12)/7));if(t.length>maxCh)t=t.slice(0,maxCh-1)+'…';
+    ctx.fillText(t,sx+6,sy+6);});
+  if(moving&&visE.length>EDGE_LOD_MAX)return;
+  ctx.textBaseline='middle';ctx.font='11px system-ui';ctx.fillStyle=TH.fg;
+  let shown=0;
+  const label=(n,bold)=>{const sx=n.x*k+view.x,sy=n.y*k+view.y;
+    if(sx<-200||sx>W||sy<-20||sy>H+20)return;
+    ctx.font=bold?'600 11px system-ui':'11px system-ui';
+    const t=n.l.length>LABEL_CHARS?n.l.slice(0,LABEL_CHARS-1)+'…':n.l;ctx.fillText(t,sx+n.r*k+3,sy);shown++;};
+  if(hl){for(const i of hl)if(on[i])label(N[i],i===sel);}
+  else for(const i of visN){if(shown>=LABEL_MAX)break;const n=N[i];if(n.r*k>=LABEL_MIN_PX||(n.lv!=null&&n.r*k>=DOT_PX*2))label(n,n.lv!=null);}
+}
+function fitView(ids){
+  ids=ids||visN;if(!ids.length)return;
+  let a=Infinity,b=Infinity,c=-Infinity,d=-Infinity;
+  for(const i of ids){const n=N[i];a=Math.min(a,n.x-n.r);b=Math.min(b,n.y-n.r);c=Math.max(c,n.x+n.r);d=Math.max(d,n.y+n.r);}
+  const left=S.sb?$('sb').getBoundingClientRect().right:0, right=S.filters?W-$('filters').getBoundingClientRect().left:0;
+  const top=$('tools').getBoundingClientRect().bottom;
+  const aw=Math.max(100,W-left-right-2*FIT_PAD_PX), ah=Math.max(100,H-top-2*FIT_PAD_PX);
+  view.k=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,Math.min(aw/Math.max(1,c-a),ah/Math.max(1,d-b))));
+  view.x=left+FIT_PAD_PX+(aw-(c-a)*view.k)/2-a*view.k;
+  view.y=top+FIT_PAD_PX+(ah-(d-b)*view.k)/2-b*view.k;
+  dirty();
+}
+function centerOn(n){view.k=Math.max(view.k,1.2);view.x=W/2-n.x*view.k;view.y=H/2-n.y*view.k;dirty();}
+
+// ── picking ─────────────────────────────────────────────────────────────
+function nodeAt(cx,cy){
+  const mx=(cx-view.x)/view.k, my=(cy-view.y)/view.k, gx=Math.floor(mx/GRID_CELL), gy=Math.floor(my/GRID_CELL);
+  let best=null,bd=Infinity;
+  for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+    for(const i of grid.get((gx+dx)+','+(gy+dy))||[]){const n=N[i],r=n.r+HIT_PAD_PX/view.k,d=(mx-n.x)**2+(my-n.y)**2;
+      if(d<=r*r&&d<bd){bd=d;best=n;}}}
+  return best;
+}
+
+// ── selection + detail panel ────────────────────────────────────────────
+let nbSort='o';
+function select(i,center){
+  S.sel=i;hl=null;
+  if(i!=null){hl=new Set([i]);for(const ei of adj[i])if(eon[ei]){const e=E[ei];hl.add(e.a===i?e.b:e.a);}}
+  renderPanel();markListSel();writeHash();dirty();
+  if(i!=null&&center)centerOn(N[i]);
+}
+function sectionPath(h){const out=[];while(h!=null&&treeBy.has(h)){out.unshift(h);h=treeBy.get(h).p;}return out;}
+function cmp(key){
+  if(key==='g')return (a,b)=>b.g-a.g||a.o-b.o;
+  if(key==='l')return (a,b)=>a.l.localeCompare(b.l)||a.o-b.o;
+  if(key==='t')return (a,b)=>a.t.localeCompare(b.t)||a.o-b.o;
+  return (a,b)=>a.o-b.o;
+}
+function renderPanel(){
+  if(S.sel==null){panel.hidden=true;panel.innerHTML='';return;}
+  const n=N[S.sel];
+  const groups=KINDS.map(()=>[]);
+  for(const ei of adj[n.i]){if(!eon[ei])continue;const e=E[ei],o=N[e.a===n.i?e.b:e.a];groups[e.k].push({n:o,rel:KINDS[e.k]==='relation'?e.r:'',d:e.d});}
+  const path=sectionPath(n.lv!=null&&treeBy.has(n.s)?treeBy.get(n.s).p:n.s);
+  let html=`<span class="x" id="px">✕</span><h2>${esc(n.l)}</h2>`
+    +`<div class="sub"><span class="dot" style="background:${nodeColor(n)}"></span>${esc(n.k)} · ${esc(n.t)} · degree ${n.g}${n.p!=null?' · page '+n.p:''}</div>`;
+  if(path.length)html+=`<div class="path">In: ${path.map(h=>`<span class="ctl" data-h="${h}">${esc(treeBy.get(h).t)}</span>`).join(' › ')}</div>`;
+  if(n.d)html+=`<div class="desc">${esc(n.d)}</div>`;
+  html+=`<div class="nbh"><span>Related</span><select id="nbs"><option value="o">document order</option><option value="g">degree</option><option value="l">name</option></select></div>`;
+  groups.forEach((g,k)=>{if(!g.length)return;
+    g.sort((a,b)=>cmp(nbSort)(a.n,b.n));
+    html+=`<div class="nbh">${esc(KIND_LABEL_NB[KINDS[k]]||KINDS[k])} (${g.length})</div>`
+      +g.slice(0,NB_MAX).map(x=>`<div class="nb" data-i="${x.n.i}" title="${esc(x.d||x.rel||'')}"><span class="dot" style="background:${nodeColor(x.n)}"></span><span class="lbl">${esc(x.n.l)}</span><span class="rel">${esc(x.rel||'')}</span></div>`).join('')
+      +(g.length>NB_MAX?`<div class="more">+${g.length-NB_MAX} more</div>`:'');});
+  panel.hidden=false;panel.innerHTML=html;
+  $('nbs').value=nbSort;$('nbs').onchange=e=>{nbSort=e.target.value;renderPanel();};
+  $('px').onclick=()=>select(null);
+  panel.querySelectorAll('.nb').forEach(el=>el.onclick=()=>select(+el.dataset.i,true));
+  panel.querySelectorAll('.path .ctl').forEach(el=>el.onclick=()=>goSection(+el.dataset.h));
+}
+function goSection(h){const n=headNode.get(h);if(n&&on[n.i])select(n.i,true);}
+
+// ── filters panel ───────────────────────────────────────────────────────
+function renderTypes(){
+  const box=$('types');let html='';
+  for(const kind of ['semantic','structure','asset']){
+    const ts=[...new Set(N.filter(n=>n.k===kind).map(n=>n.t))].sort();
+    if(!ts.length)continue;
+    html+=`<div class="sub">${kind}</div>`;
+    ts.forEach(t=>{const off=S.typesOff.has(t);
+      html+=`<div class="row${off?' off':''}" data-t="${esc(t)}"><input type="checkbox" ${off?'':'checked'} tabindex="-1"><span class="dot" style="background:${COL[t]||'#9a9a9a'}"></span><span>${esc(t)}</span><span class="only">only</span><span class="cnt">${typeCount[t]}</span></div>`;});
+  }
+  box.innerHTML=html;
+  box.querySelectorAll('.row').forEach(r=>r.onclick=e=>{const t=r.dataset.t;
+    if(e.target.classList.contains('only')){S.typesOff=new Set(Object.keys(typeCount).filter(x=>x!==t));}
+    else if(S.typesOff.has(t))S.typesOff.delete(t);else S.typesOff.add(t);
+    recompute();});
+}
+function renderKinds(){
+  const box=$('kinds');
+  box.innerHTML=KINDS.map((k,i)=>{const off=S.kindsOff.has(i);
+    return `<div class="row${off?' off':''}" data-k="${i}"><input type="checkbox" ${off?'':'checked'} tabindex="-1"><span class="ln" style="background:${TH.e[i]}"></span><span>${esc(KIND_LABEL[k]||k)}</span><span class="cnt">${kindCount[i]}</span></div>`;}).join('');
+  box.querySelectorAll('.row').forEach(r=>r.onclick=()=>{const k=+r.dataset.k;
+    if(S.kindsOff.has(k))S.kindsOff.delete(k);else S.kindsOff.add(k);recompute();});
+}
+document.querySelectorAll('#filters [data-ty]').forEach(el=>el.onclick=()=>{
+  S.typesOff=el.dataset.ty==='all'?new Set():new Set(Object.keys(typeCount));recompute();});
+$('deg').max=Math.min(maxDeg,Math.max(10,Math.ceil(Math.sqrt(maxDeg)*4)));
+$('deg').oninput=e=>{S.minDeg=+e.target.value;$('degV').textContent=S.minDeg;recompute();};
+$('iso').onchange=e=>{S.iso=e.target.checked;recompute();};
+$('colorBy').onchange=e=>{S.colorBy=e.target.value;renderPanel();refreshList();writeHash();dirty();};
+
+// ── sidebar: section tree ───────────────────────────────────────────────
+const open=new Set();
+TREE.forEach(t=>{if(t.c<0)open.add(t.h);});         // the front matter (a collection's root) starts open
+function renderTree(){
+  const q=$('tq').value.trim().toLowerCase();
+  let match=null;
+  if(q){match=new Set();TREE.forEach(t=>{if(t.t.toLowerCase().includes(q)){let h=t.h;while(h!=null&&!match.has(h)){match.add(h);h=treeBy.get(h)?.p;}}});}
+  const inherited=h=>{let p=treeBy.get(h)?.p;while(p!=null){if(S.secs.has(p))return true;p=treeBy.get(p)?.p;}return false;};
+  const rows=[];
+  const walk=(h,depth)=>{const t=treeBy.get(h);if(match&&!match.has(h))return;
+    const ks=kids.get(h)||[], isOpen=open.has(h)||!!match, inh=inherited(h);
+    rows.push(`<div class="tr${inh?' inh':''}" style="padding-left:${depth*14}px" data-h="${h}">`
+      +`<span class="cr">${ks.length?(isOpen?'▾':'▸'):''}</span>`
+      +`<input type="checkbox" ${S.secs.has(h)||inh?'checked':''} ${inh?'disabled':''}>`
+      +`<span class="tt" title="${esc(t.t)}">${esc(t.t)}</span><span class="n">${t.n}</span></div>`);
+    if(isOpen)ks.forEach(k=>walk(k,depth+1));};
+  (kids.get(null)||[]).forEach(h=>walk(h,0));
+  $('tree').innerHTML=rows.join('')||'<div class="hint">No section matches.</div>';
+}
+$('tree').onclick=e=>{
+  const row=e.target.closest('.tr');if(!row)return;const h=+row.dataset.h;
+  if(e.target.classList.contains('cr')){open.has(h)?open.delete(h):open.add(h);renderTree();return;}
+  if(e.target.tagName==='INPUT'){
+    if(S.secs.has(h))S.secs.delete(h);else{S.secs.add(h);subtreeOf([h]).forEach(x=>{if(x!==h)S.secs.delete(x);});}
+    renderTree();recompute();const sub=subtreeOf(S.secs.size?S.secs:[]);
+    if(S.secs.size)fitView(visN.filter(i=>sub.has(N[i].s)));else fitView();
+    return;}
+  const n=headNode.get(h);
+  if(n&&on[n.i]){const sub=subtreeOf([h]);fitView(visN.filter(i=>sub.has(N[i].s)));select(n.i);}
+};
+$('tq').oninput=renderTree;
+$('secAll').onclick=()=>{S.secs.clear();renderTree();recompute();fitView();};
+
+// ── sidebar: sortable node list (only the rows in view are built) ───────
+let listRows=[];
+function refreshList(){
+  const q=$('lq').value.trim().toLowerCase();
+  listRows=visN.map(i=>N[i]).filter(n=>!q||n.lo.includes(q));
+  const f=cmp(S.sort.k);listRows.sort(S.sort.d>0?f:(a,b)=>f(b,a));
+  document.querySelectorAll('#lh span').forEach(s=>{s.classList.toggle('on',s.dataset.k===S.sort.k);
+    s.textContent=s.textContent.replace(/ [▲▼]$/,'')+(s.dataset.k===S.sort.k?(S.sort.d>0?' ▲':' ▼'):'');});
+  $('vs').style.height=listRows.length*ROW_H+'px';renderRows();
+}
+function renderRows(){
+  if(S.tab!=='list')return;
+  const vl=$('vl'),first=Math.max(0,Math.floor(vl.scrollTop/ROW_H)-5),last=Math.min(listRows.length,first+Math.ceil(vl.clientHeight/ROW_H)+10);
+  let html='';
+  for(let r=first;r<last;r++){const n=listRows[r];
+    html+=`<div class="lrow${n.i===S.sel?' sel':''}" style="top:${r*ROW_H}px" data-i="${n.i}"><span title="${esc(n.l)}"><span class="dot" style="background:${nodeColor(n)}"></span>${esc(n.l)}</span><span class="num" style="text-align:left">${esc(n.t)}</span><span class="num">${n.g}</span><span class="num">${n.p??''}</span></div>`;}
+  $('vs').innerHTML=html;
+}
+function markListSel(){renderRows();}
+$('vl').onscroll=renderRows;
+$('vs').onclick=e=>{const r=e.target.closest('.lrow');if(r)select(+r.dataset.i,true);};
+$('lq').oninput=refreshList;
+document.querySelectorAll('#lh span').forEach(s=>s.onclick=()=>{
+  const k=s.dataset.k;S.sort={k,d:S.sort.k===k?-S.sort.d:1};refreshList();});
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  S.tab=b.dataset.tab;document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  $('tab-sec').hidden=S.tab!=='sec';$('tab-list').hidden=S.tab!=='list';renderRows();});
+
+// ── search ──────────────────────────────────────────────────────────────
+let hits=[],hitAt=0;
+function search(){
+  const q=$('q').value.trim().toLowerCase(),box=$('qr');
+  if(!q){box.hidden=true;hits=[];return;}
+  const byName=[],byDesc=[];let hidden=0;
+  for(const n of N){
+    const inName=n.lo.includes(q), inDesc=!inName&&n.d&&n.d.toLowerCase().includes(q);
+    if(!inName&&!inDesc)continue;
+    if(!on[n.i]){hidden++;continue;}
+    (inName?byName:byDesc).push(n);}
+  byName.sort((a,b)=>(a.lo.startsWith(q)?0:1)-(b.lo.startsWith(q)?0:1)||b.g-a.g);byDesc.sort((a,b)=>b.g-a.g);
+  hits=byName.concat(byDesc).slice(0,SEARCH_MAX);hitAt=0;
+  const total=byName.length+byDesc.length;
+  box.innerHTML=hits.map((n,j)=>{const c=N[n.i].c>=0?cellTitle(CELLS[N[n.i].c]):'';
+      return `<div class="r${j===0?' on':''}" data-i="${n.i}"><span class="dot" style="background:${nodeColor(n)}"></span><span>${esc(n.l)}</span><small>${esc(n.t)}${c?' · '+esc(c.slice(0,40)):''}</small></div>`;}).join('')
+    +(total>hits.length?`<div class="note">${total-hits.length} more — type more to narrow</div>`:'')
+    +(hidden?`<div class="note">${hidden} hidden by the filters</div>`:'')
+    +(!total&&!hidden?'<div class="note">No match</div>':'');
+  box.hidden=false;
+}
+function pickHit(j){const n=hits[j];if(!n)return;$('qr').hidden=true;select(n.i,true);}
+$('q').oninput=search;
+$('q').onfocus=search;
+$('q').onkeydown=e=>{
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(!hits.length)return;
+    hitAt=(hitAt+(e.key==='ArrowDown'?1:hits.length-1))%hits.length;
+    $('qr').querySelectorAll('.r').forEach((r,j)=>r.classList.toggle('on',j===hitAt));
+    $('qr').querySelectorAll('.r')[hitAt]?.scrollIntoView({block:'nearest'});}
+  else if(e.key==='Enter'){pickHit(hitAt);}
+  else if(e.key==='Escape'){$('qr').hidden=true;$('q').blur();}
+};
+$('qr').onmousedown=e=>{const r=e.target.closest('.r');if(r){e.preventDefault();select(+r.dataset.i,true);$('qr').hidden=true;}};
+$('q').onblur=()=>setTimeout(()=>$('qr').hidden=true,150);
+
+// ── canvas interaction: pan, zoom, drag, hover, click ───────────────────
+let drag=null;
+cv.addEventListener('mousedown',e=>{
+  const n=nodeAt(e.clientX,e.clientY);
+  drag=n?{n,sx:e.clientX,sy:e.clientY,moved:false}:{pan:true,sx:e.clientX,sy:e.clientY,vx:view.x,vy:view.y,moved:false};
+  cv.style.cursor='grabbing';
+});
+addEventListener('mousemove',e=>{
+  if(drag){
+    if(Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)>4)drag.moved=true;
+    if(!drag.moved)return;
+    if(drag.pan){view.x=drag.vx+e.clientX-drag.sx;view.y=drag.vy+e.clientY-drag.sy;motion();}
+    else{drag.n.x=(e.clientX-view.x)/view.k;drag.n.y=(e.clientY-view.y)/view.k;dirty();}
+    tip.style.display='none';return;
+  }
+  if(e.target!==cv){tip.style.display='none';return;}
+  const n=nodeAt(e.clientX,e.clientY);
+  if(n){tip.style.display='block';tip.style.left=Math.min(e.clientX+14,W-370)+'px';tip.style.top=(e.clientY+14)+'px';
+    tip.innerHTML=`<b>${esc(n.l)}</b> <span style="color:#aaa">(${esc(n.t)}, deg ${n.g}${n.p!=null?', p. '+n.p:''})</span>`+(n.d?`<br>${esc(n.d.slice(0,300))}`:'');
+    cv.style.cursor='pointer';}
+  else{tip.style.display='none';cv.style.cursor='grab';}
+});
+addEventListener('mouseup',()=>{
+  if(drag){
+    if(!drag.moved)select(drag.pan?null:drag.n.i);
+    else if(!drag.pan)buildGrid();
+    cv.style.cursor='grab';}
+  drag=null;
+});
+cv.addEventListener('wheel',e=>{e.preventDefault();
+  const s=e.deltaY<0?ZOOM_STEP:1/ZOOM_STEP, k=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,view.k*s)), f=k/view.k;
+  view.x=e.clientX-(e.clientX-view.x)*f;view.y=e.clientY-(e.clientY-view.y)*f;view.k=k;motion();},{passive:false});
+cv.addEventListener('dblclick',e=>{if(!nodeAt(e.clientX,e.clientY))fitView();});
+
+// ── toolbar ─────────────────────────────────────────────────────────────
+const root=document.documentElement;
+function setTheme(t){root.setAttribute('data-theme',t);try{localStorage.setItem('kg-theme',t);}catch(e){}
+  $('theme').textContent=t==='dark'?'☀':'🌙';readTheme();renderKinds();dirty();}
+$('theme').onclick=()=>setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark');
+$('fit').onclick=()=>fitView();
+$('reset').onclick=()=>{N.forEach(n=>{n.x=n.x0;n.y=n.y0;});buildGrid();dirty();};
+$('sbBtn').onclick=()=>{S.sb=!S.sb;$('sb').hidden=!S.sb;$('sbBtn').classList.toggle('on',S.sb);};
+$('fBtn').onclick=()=>{S.filters=!S.filters;$('filters').hidden=!S.filters;$('fBtn').classList.toggle('on',S.filters);};
+addEventListener('keydown',e=>{if(e.key==='Escape'&&document.activeElement===document.body)select(null);
+  if(e.key==='/'&&document.activeElement===document.body){e.preventDefault();$('q').focus();}});
+addEventListener('resize',()=>{resize();renderRows();});
+
+// ── start ───────────────────────────────────────────────────────────────
+readHash();
+let saved=null;try{saved=localStorage.getItem('kg-theme');}catch(e){}
+root.setAttribute('data-theme',saved||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));
+$('theme').textContent=root.getAttribute('data-theme')==='dark'?'☀':'🌙';
+readTheme();resize();
+$('deg').value=S.minDeg;$('degV').textContent=S.minDeg;$('iso').checked=S.iso;$('colorBy').value=S.colorBy;
+$('sbBtn').classList.add('on');$('fBtn').classList.add('on');
+renderTree();recompute();
+const sel=S.sel;S.sel=null;
+if(S.secs.size){const sub=subtreeOf(S.secs);fitView(visN.filter(i=>sub.has(N[i].s)));}else fitView();
+if(sel!=null&&on[sel])select(sel,true);
+</script>

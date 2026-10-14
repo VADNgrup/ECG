@@ -12,15 +12,16 @@ import time as _t
 import unicodedata
 from pathlib import Path
 
-import fitz
+import pymupdf
 import psutil
 import torch
 from tqdm import tqdm
 
 from src.rag import build_kg as B, llm_mode, ocr as _ocr, view_kg
 from src.rag.structural import _MIN_RELIABLE_TOC_ENTRIES
+from src.utils import collection
 from src.utils.config import Config
-from src.utils.llm import end_llm_run, llm_run_active, set_llm_phase, start_llm_run
+from src.utils.llm import PAGE_READING_PHASE, end_llm_run, llm_run_active, set_llm_phase, start_llm_run
 
 
 def _setup_progress() -> None:
@@ -64,8 +65,11 @@ def _page_tag(pages: tuple[int, int] | None) -> str:
 
 
 def _pdf_pages(pdf: Path) -> int:
+    manifest = collection.manifest_of(pdf)
+    if collection.is_files(manifest):                # a collection of separate files: its pages, numbered on
+        return manifest["documents"][-1]["pages"][1] + 1 if manifest["documents"] else 0
     try:
-        with fitz.open(str(pdf)) as d:
+        with pymupdf.open(str(pdf)) as d:
             return d.page_count
     except Exception:
         return 0
@@ -96,7 +100,7 @@ async def _with_heartbeat(coro, label: str):
 _KEEP_ON_REBUILD = {"kv_store_llm_response_cache.json"}
 # What a KB holds depends on this code: raise it when the KG build changes (a KB of another version is rebuilt once,
 # reusing the page reading and the LLM extraction cache).
-KB_VERSION = "kb-2026-10-06-no-cooccurrence"
+KB_VERSION = "kb-2026-11-05-table-formula-pictures"
 _KB_STAMP = "kb_version.json"
 
 
@@ -132,7 +136,7 @@ def _resolve_method(pdf: Path) -> str:
         return _METHOD_CACHE[key]
     m = "auto"
     try:
-        with fitz.open(str(pdf)) as d:
+        with pymupdf.open(str(pdf)) as d:
             n = d.page_count
             idxs = list(range(0, n, max(1, n // 8))) or [0]
             chars = [len(d[p].get_text("text").strip()) for p in idxs]
@@ -145,13 +149,34 @@ def _resolve_method(pdf: Path) -> str:
     return m
 
 
+def _outline_size(pdf: Path) -> int:
+    """The PDF's embedded outline entries; the merge's own entries say nothing: the document with the least decides."""
+    toc = B._embedded_outline_levels(pdf)
+    manifest = collection.manifest_of(pdf)
+    if manifest:
+        return min(collection.own_outline_sizes(B._embedded_outline_entries(pdf) or [], manifest), default=0)
+    return len(toc) if toc else 0
+
+
+def reading_facts(pdf: Path) -> dict:
+    """What the choice of where the headings come from rests on: {entries (of the embedded outline), reader (who reads
+    the pages, .env OCR_MODE), reliable (an outline long enough to trust)}."""
+    entries = _outline_size(pdf)
+    return {"entries": entries, "reader": Config.OCR_MODE, "reliable": entries >= _MIN_RELIABLE_TOC_ENTRIES}
+
+
+def will_parse(pdf: Path, force: bool = False) -> bool:
+    """Whether `extract_one` would read the pages: no current KG for this PDF, or `force`."""
+    kb = B.KB_DIR / pdf.stem
+    return force or not (kb / "graph_chunk_entity_relation.graphml").exists() or _kb_version(kb) != KB_VERSION
+
+
 def _resolve_ocr(pdf: Path) -> str:
     """--ocr auto: skip the costly vision-LLM OCR pass when the PDF already has a reliable embedded
     outline (real bookmarks, not a scan) AND a clean digital text layer -- OCR was only ever needed for
     scanned pages or garbled font/ToUnicode maps, not every book. Reuses _resolve_method's own digital/
     scanned sample (and its cache), so an explicit --parse-method override is respected automatically."""
-    toc = B._embedded_outline_levels(pdf)
-    n = len(toc) if toc else 0
+    n = _outline_size(pdf)
     if n >= _MIN_RELIABLE_TOC_ENTRIES and _resolve_method(pdf) == "txt":
         tqdm.write(f"[ocr] auto: embedded TOC ({n} entries) + digital text layer -> --ocr none")
         return "none"
@@ -171,7 +196,7 @@ def _detect_ft(pdf: Path) -> tuple[bool, bool]:
         return _FT_CACHE[key]
     technical = True
     try:
-        with fitz.open(str(pdf)) as d:
+        with pymupdf.open(str(pdf)) as d:
             n = d.page_count
             idxs = list(range(0, n, max(1, n // 12))) or [0]
             tot = digit = math = imgs = 0
@@ -363,8 +388,42 @@ async def _parse_ocr(pdf: Path, pages: tuple[int, int] | None) -> Path:
     return cl
 
 
+async def _parse_files(pdf: Path, manifest: dict, embed: str, window: int) -> Path:
+    """A collection of separate files: each document read on its own (its own cache, outline and figures), the
+    readings joined in order with their pages numbered on after the documents before them and their pictures copied
+    beside the joined list -- the content list a merged PDF would have given."""
+    out_dir = PARSE_DIR / f"_files_{pdf.stem}"
+    joined = out_dir / f"{pdf.stem}_content_list.json"
+    if joined.exists():
+        print(f"[parse] cached joined content_list: {joined}")
+        return joined
+    (out_dir / "images").mkdir(parents=True, exist_ok=True)
+    items: list = []
+    for n, d in enumerate(manifest["documents"], 1):
+        source = collection.source_pdf(pdf, d)
+        print(f"[parse] {n}/{len(manifest['documents'])}: {source.name}")
+        part = await _parse(source, embed, None, window)
+        for it in json.loads(part.read_text(encoding="utf-8")):
+            it = dict(it)
+            if isinstance(it.get("page_idx"), int):
+                it["page_idx"] += d["pages"][0]
+            if it.get("img_path"):
+                picture = part.parent / it["img_path"]
+                name = f"{source.stem}__{Path(it['img_path']).name}"
+                if picture.is_file():
+                    shutil.copyfile(picture, out_dir / "images" / name)
+                it["img_path"] = f"images/{name}"
+            items.append(it)
+    joined.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    print(f"[parse] {len(manifest['documents'])} documents joined -> {joined} ({len(items)} blocks)")
+    return joined
+
+
 async def _parse(pdf: Path, embed: str, pages: tuple[int, int] | None = None, window: int = 40) -> Path:
     stem = pdf.stem
+    manifest = collection.manifest_of(pdf)
+    if collection.is_files(manifest):
+        return await _parse_files(pdf, manifest, embed, window)
     ocr = _PARSE_OPTS.get("ocr")
     if ocr == "auto":
         ocr = _resolve_ocr(pdf)
@@ -406,7 +465,12 @@ def configure(ocr: str = "auto") -> None:
     os.environ["MINERU_DEVICE_MODE"] = device
     if device == "cuda":
         os.environ.setdefault("MINERU_VIRTUAL_VRAM_SIZE", "3")
-        print(f"[parse] GPU enabled (cuda · VRAM cap {os.environ['MINERU_VIRTUAL_VRAM_SIZE']}GB)")
+        print(f"[parse] GPU enabled - extracting")
+
+
+def headings_from(source: str) -> None:
+    """Where the next build takes its headings: "toc" (the PDF's embedded outline) or "ocr" (the page reading)."""
+    _PARSE_OPTS["headings"] = source
 
 
 def _embed_backend() -> str:
@@ -414,11 +478,22 @@ def _embed_backend() -> str:
     return "openai" if Config.EMBED_BACKEND == "openai" else "local"
 
 
+def ocr_from_env() -> str:
+    """The `--ocr` value .env's OCR_MODE names: cloud (the default) -> cloud, mineru -> none."""
+    if Config.OCR_MODE not in Config.OCR_MODES:
+        raise SystemExit(f"OCR_MODE={Config.OCR_MODE!r} in .env: use one of {', '.join(Config.OCR_MODES)}")
+    return Config.OCR_MODES[Config.OCR_MODE]
+
+
 def forget(pdf: Path) -> list[Path]:
     """Delete everything the KG step of `pdf` would reuse -- its KB (LLM extraction cache included) and its parse
     caches (OCR pages, MinerU output and windows) -- so the next build starts from the PDF."""
     stem = pdf.stem
-    own = re.compile(rf"_(?:mineru|ocr[a-z]+)_{re.escape(stem)}(?:__w\d+-\d+)?")
+    manifest = collection.manifest_of(pdf)
+    stems = [stem] + ([collection.source_pdf(pdf, d).stem for d in manifest["documents"]]
+                      if collection.is_files(manifest) else [])      # a collection of files: each file's reading too
+    names = "|".join(re.escape(s) for s in stems)
+    own = re.compile(rf"_(?:mineru|ocr[a-z]+|files)_(?:{names})(?:__w\d+-\d+)?")
     targets = [B.KB_DIR / stem] + ([p for p in PARSE_DIR.iterdir() if own.fullmatch(p.name)] if PARSE_DIR.exists() else [])
     removed = []
     for path in targets:
@@ -453,12 +528,13 @@ async def extract_one(pdf: Path, force: bool = False, pages: tuple[int, int] | N
         status = "completed"
         llm_mode.ensure_ready()
         try:
-            set_llm_phase("rag_parse")
+            set_llm_phase(PAGE_READING_PHASE)
             cl = await _parse(pdf, embed, pages, window)
             set_llm_phase("rag_extract")
             await B.build(doc=stem, mode="mineru", embed_backend=embed, include_images=True,
                           multimodal=True, content_list_path=str(cl),
-                          multimodal_content=True, structural=True, kb_dir=kb, pdf_path=pdf)
+                          multimodal_content=True, structural=True, kb_dir=kb, pdf_path=pdf,
+                          outline=_PARSE_OPTS.get("headings", "toc") == "toc")
             (kb / _KB_STAMP).write_text(json.dumps({"version": KB_VERSION}), encoding="utf-8")
         except Exception:
             status = "failed"
@@ -533,10 +609,13 @@ def main():
                     help="only extract a page range 'START-END' (0-based inclusive, e.g. '0-25')")
     ap.add_argument("--force", action="store_true",
                     help="rebuild even if the KB exists (keeps the LLM extraction cache -> near-free)")
-    ap.add_argument("--ocr", default="cloud", choices=["auto", "none", "cloud"],
-                    help="reading the pages: 'cloud' (default) = a vision LLM (.env VLM_*) OCRs every rendered "
-                         "page; 'auto' = MinerU on the text layer when the PDF has an embedded outline and a "
-                         "digital text layer, else 'cloud'; 'none' = always MinerU")
+    ap.add_argument("--ocr", default=None, choices=["auto", "none", "cloud"],
+                    help="reading the pages: 'cloud' = a vision LLM (.env VLM_*) OCRs every rendered page; 'auto' = "
+                         "MinerU on the text layer when the PDF has an embedded outline and a digital text layer, "
+                         "else 'cloud'; 'none' = always MinerU (default: .env OCR_MODE, cloud when unset)")
+    ap.add_argument("--headings", default="toc", choices=["toc", "ocr"],
+                    help="where the headings come from: 'toc' (default) = the PDF's embedded outline when it has one; "
+                         "'ocr' = the page reading (its printed contents page and heading marks)")
     ap.add_argument("--llm", default="cloud", choices=["cloud", "local"],
                     help="KG entity extraction and table captions: 'cloud' (default) = KG_LLM_*/OPENAI_API_KEY; "
                          "'local' = a local Ollama server (KG_LLM_*/KG_VLM_*, default qwen3.5:9b)")
@@ -546,7 +625,8 @@ def main():
         raise SystemExit("KG LLM API key not set (KG_LLM_API_KEY or OPENAI_API_KEY in .env)")
     print(f"[llm] {args.llm}: entity-extraction={B.KG_LLM_MODEL} ({B.LLM_BASE_URL}) · "
           f"vision={B.VLM_MODEL} ({B.VLM_BASE_URL})")
-    configure(args.ocr)
+    configure(args.ocr or ocr_from_env())
+    headings_from(args.headings)
     _setup_progress()
 
     pages = None

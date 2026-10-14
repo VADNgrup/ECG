@@ -9,7 +9,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-import fitz
+import pymupdf
 import networkx as nx
 import tiktoken
 from bs4 import BeautifulSoup
@@ -21,7 +21,7 @@ from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
-from src.rag import evidence_store, llm_mode, outline, view_kg
+from src.rag import evidence_store, heading_check, image_role, llm_mode, outline, view_kg
 from src.rag.asset_validation import validate_asset_records
 from src.rag.chunking import marker_chunking_func_mini
 from src.rag.code_text import (_CODE_END_RE, _CODE_OPEN_RE, _CODE_TOKEN_RE, _has_code_line,
@@ -29,7 +29,6 @@ from src.rag.code_text import (_CODE_END_RE, _CODE_OPEN_RE, _CODE_TOKEN_RE, _has
 from src.rag.code_images import render_code_blocks
 from src.rag.figure_captions import analyze
 from src.rag.kg_dedup import clean_kb
-from src.rag.kg_salience import enrich_kb
 from src.rag.kg_schema import (normalize_graph_schema, SEMANTIC_ENTITY_TYPES, validate_graph_schema,
                                write_schema_metadata)
 from src.rag.retrieve_content import load_asset_headings, load_text_chunks
@@ -39,8 +38,9 @@ from src.rag.structural import (_clean_chars as _struct_norm, _families_nesting,
                                 build_structural_index as _rag_build_structural_index,
                                 build_structural_index_from_toc as _rag_build_structural_index_from_toc,
                                 STRUCT_MARK as _STRUCT_MARK, STRUCT_MARK_RE)
+from src.utils import collection, lang
 from src.utils.config import Config
-from src.utils.content_cache import cache_path, cached_json
+from src.utils.content_cache import cached_json, stored
 from src.utils.llm import _write_log
 
 _pydir = Path(sys.executable).parent
@@ -472,7 +472,7 @@ def _pdf_metadata_title(pdf_path: Path | None) -> str | None:
     if not pdf_path:
         return None
     try:
-        t = (fitz.open(str(pdf_path)).metadata or {}).get("title", "")
+        t = (pymupdf.open(str(pdf_path)).metadata or {}).get("title", "")
         t = re.sub(r"\s+", " ", t or "").strip()
         return t[:120] or None
     except Exception:
@@ -480,18 +480,44 @@ def _pdf_metadata_title(pdf_path: Path | None) -> str | None:
 
 
 def _embedded_outline_entries(pdf_path: Path | None) -> list[tuple[int, str, int]] | None:
-    """Ordered embedded PDF outline (fitz.get_toc): [(level, title, page1based), ...]. Physical
+    """Ordered embedded PDF outline (pymupdf.get_toc): [(level, title, page1based), ...]. Physical
     page numbers -> usable as the authoritative heading backbone. None if <3 entries / no outline."""
     if not pdf_path:
         return None
+    manifest = collection.manifest_of(pdf_path)
+    if collection.is_files(manifest):             # separate files: their outlines, as a merged PDF's would read
+        entries = OutlineEntries(collection.outline(pdf_path, manifest))
+        entries.detect_titles = tuple(d["title"] for d in manifest["documents"])
+        return entries or None
     try:
-        toc = fitz.open(str(pdf_path)).get_toc()
+        toc = pymupdf.open(str(pdf_path)).get_toc()
     except Exception:
         return None
     if len(toc) < 3:
         return None
-    entries = [(int(level), title, int(page)) for level, title, page in toc if (title or "").strip()]
+    entries = OutlineEntries((int(level), title, int(page)) for level, title, page in toc if (title or "").strip())
+    manifest = collection.manifest_of(pdf_path)
+    if manifest:                                  # a collection: what a document's own outline misses gets detection
+        entries.detect_titles = tuple(d["title"] for d in manifest["documents"])
     return entries or None
+
+
+class OutlineEntries(list):
+    """Outline entries [(level, title, page)], with the titles of entries whose inside the parser's headings fill."""
+    detect_titles: tuple = ()
+
+
+def _retitled(entries: OutlineEntries | None, pdf_path: Path | None, content_list_path) -> OutlineEntries | None:
+    """A collection's documents named after their file take the title read on their first page."""
+    if not entries:
+        return entries
+    names = collection.retitle(pdf_path, json.loads(Path(content_list_path).read_text(encoding="utf-8")))
+    if not names:
+        return entries
+    out = OutlineEntries((level, names.get(title, title) if level == 1 else title, page)
+                         for level, title, page in entries)
+    out.detect_titles = tuple(names.get(t, t) for t in entries.detect_titles)
+    return out
 
 
 def _embedded_outline_levels(pdf_path: Path | None) -> dict[str, int] | None:
@@ -624,13 +650,17 @@ def _build_asset_headings(content_list_path: str, toc_levels: dict[str, int] | N
     by retrieve_content.select_content_for_heading for a slide's section_assets. img_path is stored
     relative to the project root (image copied into working_dir/images/ via _persist_image).
 
-    A figure is an asset when it carries its own caption (the document's "Figure N-M. ..."); its caption is that one.
+    A figure is an asset when it carries its own caption (the document's "Figure N-M. ..."; its caption is that one) or
+    when the vision model calls an uncaptioned one content (no caption is written for it).
     `asset_captions[item_index]` supplies the LLM table summary."""
     base = Path(content_list_path).parent
     items = json.loads(Path(content_list_path).read_text(encoding="utf-8"))
     per = _structure_index(str(content_list_path), toc_levels, toc_entries, page_offset)
     caps = asset_captions or {}
     figures = analyze(items)
+    content = image_role.content_images(items, base, figures, VLM_MODEL, VLM_BASE_URL, VLM_API_KEY)
+    labels = lang.learn_labels([" ".join(str(it.get("text") or "").split()) for it in items if it.get("type") == "text"])
+    table_caption = lang.caption_text_pattern(labels)     # a caption line right below a table
     out: list[dict] = []
     for i, it in enumerate(items):
         t = it.get("type")
@@ -642,15 +672,15 @@ def _build_asset_headings(content_list_path: str, toc_levels: dict[str, int] | N
             rel = it.get("img_path") or ""
             info = figures.get(Path(rel).name, {})
             real = info.get("real_caption", "")
-            if info.get("decorative") or not real:
-                continue        # page furniture, or a picture the document gives no caption: never a slide asset
+            if info.get("decorative") or not (real or Path(rel).name in content):
+                continue        # page furniture, or an uncaptioned picture the vision model calls decoration
             abs_path = base / rel if rel else None
             img_path = _persist_image(abs_path, working_dir)
             if not img_path:
                 continue
             out.append({"node": node, "page": page, "type": "image", "img_path": img_path,
                         "caption": real, "real_caption": real, "classification": "informative",
-                        "classification_reason": "caption",
+                        "classification_reason": "caption" if real else "vlm_content",
                         "area_frac": info.get("area_frac"), "bbox": info.get("bbox"), "kind": info.get("kind", "image")})
         elif t == "table":
             body = (it.get("table_body") or "").strip()
@@ -658,9 +688,13 @@ def _build_asset_headings(content_list_path: str, toc_levels: dict[str, int] | N
                 continue
             doc_cap = it.get("table_caption") or []
             doc_cap = " ".join(doc_cap) if isinstance(doc_cap, list) else str(doc_cap)
+            after = items[i + 1] if i + 1 < len(items) else {}
+            below = " ".join(str(after.get("text") or "").split()) if after.get("type") == "text" else ""
+            real = doc_cap or (below if table_caption.fullmatch(below) else "")
             out.append({"node": node, "page": page, "type": "table",
                         "table_body": (_html_table_to_md(body) or body)[:2000],  # markdown for readability
-                        "caption": caps.get(i) or doc_cap})  # LLM table summary preferred
+                        "caption": caps.get(i) or doc_cap,  # LLM table summary preferred
+                        "real_caption": real})              # the document's own words, for what is drawn
         elif t == "equation":
             latex = (it.get("text") or it.get("latex") or "").strip()
             if latex:
@@ -784,13 +818,12 @@ async def _caption_table(llm_func, html: str, existing_caption: str = "") -> tup
               "variables/columns being compared and the key finding or contrast. Do not invent numbers.\n\n"
               + (f"Caption: {existing_caption}\n" if existing_caption else "")
               + f"Table:\n{body_for_prompt[:2000]}")
-    # The summary is part of the text stream that is cut into chunks: kept across rebuilds (even --force), so a reworded
-    # summary never shifts every later chunk boundary and invalidates the whole extraction cache.
-    stored = cache_path(_TABLE_SUMMARY_CACHE, KG_LLM_MODEL, prompt)
-    try:
-        return md, json.loads(stored.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        pass
+    # The summary is part of the text stream that is cut into chunks: kept across rebuilds, so a reworded summary never
+    # shifts every later chunk boundary and invalidates the whole extraction cache; --force (which drops that extraction
+    # cache too) asks it again.
+    kept = stored(_TABLE_SUMMARY_CACHE, KG_LLM_MODEL, prompt)
+    if kept is not None:
+        return md, kept
     try:
         summary = (await llm_func(prompt) or "").strip()
     except Exception as e:
@@ -800,19 +833,38 @@ async def _caption_table(llm_func, html: str, existing_caption: str = "") -> tup
     return md, summary
 
 
+def _document_segments(text_stream: str, pdf_path: Path | None) -> list[tuple[str, str]]:
+    """[(document title, its part of the stream)]: a collection's stream cut where each document's first block begins
+    (the blocks' `[[p|n]]` markers carry their page, the sidecar each document's first page), so MiniRAG chunks each
+    document on its own and no chunk holds the end of one document and the start of the next; one ("", stream) for a
+    single document."""
+    manifest = collection.manifest_of(pdf_path) if pdf_path else None
+    if not manifest or len(manifest["documents"]) < 2:
+        return [("", text_stream)]
+    docs = manifest["documents"]
+    starts, cuts, nxt = [d["pages"][0] for d in docs], [0], 1
+    for m in STRUCT_MARK_RE.finditer(text_stream):
+        while nxt < len(docs) and int(m.group(1)) >= starts[nxt]:
+            cuts.append(m.start())
+            nxt += 1
+    cuts += [len(text_stream)] * (len(docs) + 1 - len(cuts))
+    parts = [(d["title"], text_stream[cuts[k]:cuts[k + 1]]) for k, d in enumerate(docs)]
+    return [(title, part) for title, part in parts if part.strip()]
+
+
 async def _content_list_to_text_stream(content_list_path: str, llm_func, *, structural: bool,
                                        toc_levels: dict | None, toc_entries: list | None,
                                        working_dir: Path,
                                        code_renders: dict[int, dict] | None = None
                                        ) -> tuple[str, dict[int, str], dict[int, dict]]:
     """Flatten a MinerU/OCR content_list into ONE markdown text stream for MiniRAG's insert(text):
-    text/code kept verbatim, a figure by its own caption (no model: a figure without one is decoration), tables
+    text/code kept verbatim, a figure by its own caption (an uncaptioned one adds no text), tables
     converted to markdown + a one-line LLM summary, equations inlined. Every block is prefixed with its `[[p|n]]` struct marker (same
     _structure_index node map) so the structural layer can attribute concepts to headings;
     marker_chunking_func_mini strips the markers before the LLM sees the text.
 
-    Returns ``(text_stream, asset_captions, image_decisions)``; a figure is ``informative`` exactly when the document
-    captions it."""
+    Returns ``(text_stream, asset_captions, image_decisions)``; a figure is ``informative`` when the document captions
+    it, or when the vision model calls an uncaptioned one content (`image_role`)."""
     base = Path(content_list_path).parent
     items = json.loads(Path(content_list_path).read_text(encoding="utf-8"))
     per = _structure_index(str(content_list_path), toc_levels, toc_entries, 0) if structural else None
@@ -837,6 +889,7 @@ async def _content_list_to_text_stream(content_list_path: str, llm_func, *, stru
         return i, (md, summary)
 
     figures = analyze(items)
+    content = image_role.content_images(items, base, figures, VLM_MODEL, VLM_BASE_URL, VLM_API_KEY)
 
     image_decisions: dict[int, dict] = {}
     for i, it in enumerate(items):
@@ -849,6 +902,8 @@ async def _content_list_to_text_stream(content_list_path: str, llm_func, *, stru
             image_decisions[i] = {"classification": "decorative", "caption": "", "reason": "geometry_decorative"}
         elif info.get("real_caption"):
             image_decisions[i] = {"classification": "informative", "caption": info["real_caption"], "reason": "caption"}
+        elif Path(it["img_path"]).name in content:
+            image_decisions[i] = {"classification": "informative", "caption": "", "reason": "vlm_content"}
         else:
             image_decisions[i] = {"classification": "decorative", "caption": "", "reason": "no_caption"}
 
@@ -909,7 +964,9 @@ async def build(doc: str, mode: str, embed_backend: str, include_images: bool,
                 multimodal: bool = True, content_list_path: str | None = None,
                 kb_suffix: str = "", multimodal_content: bool = False,
                 mm_pages: tuple[int, int] | None = None, structural: bool = False,
-                kb_dir: Path | None = None, pdf_path: Path | None = None) -> Path:
+                kb_dir: Path | None = None, pdf_path: Path | None = None, outline: bool = True) -> Path:
+    """`outline`: the headings come from the PDF's embedded outline (pymupdf get_toc) when it has one; False: from the
+    page reading (its printed contents page and heading marks, checked by the LLM)."""
     document_id, resolved_pdf_path = _resolve_document(doc)
     # `_resolve_document` only looks under RAW_DIR -- callers whose source PDF lives elsewhere (e.g.
     # `extract_one` for a page-range-trimmed file under RAW_DIR/_trimmed/) must pass the real path
@@ -930,12 +987,16 @@ async def build(doc: str, mode: str, embed_backend: str, include_images: bool,
         toc_levels = None
         toc_entries = None  # embedded outline -> TOC-backbone (authoritative headings)
         if structural:
-            toc_entries = _embedded_outline_entries(pdf_path)
+            toc_entries = _retitled(_embedded_outline_entries(pdf_path), pdf_path, content_list_path) if outline else None
             if toc_entries:
                 print(f"[structural] embedded PDF outline found ({len(toc_entries)} entries) "
                       f"-> TOC-backbone heading extraction")
             else:
                 toc_levels = _toc_levels(content_list_path)
+            # an outline alone defines the headings unless the parser's marks fill in what it does not cover
+            if not toc_entries or getattr(toc_entries, "detect_titles", None):
+                content_list_path = await heading_check.checked(content_list_path, _make_llm_func(), KG_LLM_MODEL,
+                                                                [e[1] for e in toc_entries or []] + list(toc_levels or {}))
             struct_idx = _build_structural_index(content_list_path, document_id, toc_levels=toc_levels,
                                                  pdf_path=pdf_path, toc_entries=toc_entries)
         # MiniRAG only inserts text -> flatten the content_list (figures by their own caption, tables with a
@@ -984,7 +1045,11 @@ async def build(doc: str, mode: str, embed_backend: str, include_images: bool,
             (working_dir / "structural_index.json").write_text(
                 json.dumps(struct_idx, ensure_ascii=False), encoding="utf-8")
         rag = _make_rag(working_dir, embed_backend=embed_backend, structural_index=struct_idx)
-        await _with_extract_heartbeat(rag.ainsert(text_stream))
+        # one insert; a collection's documents go in as separate texts, so each is chunked on its own
+        segments = _document_segments(text_stream, pdf_path)
+        if len(segments) > 1:
+            print(f"[KG] {len(segments)} documents, each chunked on its own")
+        await _with_extract_heartbeat(rag.ainsert([part for _, part in segments]))
     elif content_list_path:
         content_list = _mineru_content_list_to_text(Path(content_list_path))
         text_stream = "\n\n".join((c.get("text") or "").strip() for c in content_list if (c.get("text") or "").strip())
@@ -1030,20 +1095,14 @@ async def build(doc: str, mode: str, embed_backend: str, include_images: bool,
         except Exception as e:
             # Schema violations must not be hidden: an invalid graph would contaminate slide generation.
             raise RuntimeError(f"KG schema finalization failed: {e}") from e
-        # Deterministic KG enrichment (no LLM): salience.json + prerequisite_of edges, used by
         # Only meaningful with the structural layer.
         if structural:
-            # NDAKG-style cleanup FIRST (prune chunk-bleed `mentions` edges so a chunk straddling a
-            # section boundary can't leak entities into the wrong heading), THEN salience on the
-            # cleaned graph.
+            # NDAKG-style cleanup: prune chunk-bleed `mentions` edges so a chunk straddling a section boundary can't
+            # leak entities into the wrong heading.
             try:
                 clean_kb(working_dir, threshold=Config.KG_DEDUP_THRESHOLD, dedup=Config.KG_DEDUP_ENABLED)
             except Exception as e:
                 print(f"[kg_dedup] cleanup skipped: {e}")
-            try:
-                enrich_kb(working_dir)
-            except Exception as e:
-                print(f"[kg_salience] enrichment skipped: {e}")
             # The slide Evidence Service ranks exact source sentences, while
             # MiniRAG itself stores coarser chunk/entity vectors.  Precompute
             # the sentence layer now so the first deck run does not pay that

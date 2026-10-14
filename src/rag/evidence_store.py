@@ -20,6 +20,7 @@ from src.rag import minirag_retriever
 from src.rag.embedder import embed_transient, Embedder
 from src.rag.idea_candidates import normalize_name, scope_sentences
 from src.rag.kg_schema import is_semantic_node
+from src.rag.kb_files import load_text_chunks
 from src.rag.retrieve_content import load_kg_graph, load_structural_index, scope_ids
 from src.rag.unit_roles import role_of
 from src.utils import lang
@@ -62,6 +63,7 @@ class EvidenceStore:
     def __init__(self, kb_dir: Path, scope_root_ids: Sequence[int], embedder: Optional[Embedder] = None,
                  retriever: Optional["minirag_retriever.MiniRAGRetriever"] = None):
         self.kb_dir = Path(kb_dir)
+        self._chunk_texts: Optional[dict] = None
         self.retriever = retriever if retriever is not None else minirag_retriever.MiniRAGRetriever(self.kb_dir)
         self.index = load_structural_index(self.kb_dir)
         headings = self.index.get("headings") or {}
@@ -270,6 +272,12 @@ class EvidenceStore:
             if score > 0:
                 scores[i] = score
         return scores
+
+    def chunk_text(self, chunk_id: str) -> str:
+        """The whole text of a KB chunk, what lies outside the scope included."""
+        if self._chunk_texts is None:
+            self._chunk_texts = load_text_chunks(self.kb_dir)
+        return str((self._chunk_texts.get(chunk_id) or {}).get("content") or "")
 
     def retrieve_scoped(self, query: str, heading_ids: Iterable[int], keywords: Sequence[str] = (), k: int = 10,
                         exclude: Iterable[str] = (), role: str = "retriever", gated: bool = True) -> List[dict]:

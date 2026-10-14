@@ -111,6 +111,9 @@ SPECS: Tuple[LayoutSpec, ...] = (
     _s("formula_below_layout", "formula_result", "An equation placed below the explanation that leads to it.", needs="formula",
        long_text=True),
     _s("data_table_layout", "table_only", "A table alone as the evidence (no bullets).", needs="table_data", long_text=True),
+    # given by the manifest, never offered to the Writer: a figure and a formula or table that both fit one page
+    _s("figure_asset_layout", "figure_asset", "A figure beside its formula or table, the explanation under them.",
+       needs="figure_asset", long_text=True),
     _s("formula_annotated_layout", "formula_terms", "An equation whose points each explain one symbol or term.", 2, 99,
        needs="formula", body_chars=110),
     # layouts about pictures / source tables: chosen when those assets exist (image distribution / table extraction)

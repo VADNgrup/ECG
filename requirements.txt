@@ -50,3 +50,4 @@ pyvis>=0.3.2
 #   marker-pdf (Track P — the marker parser + src/rag/marker_adapter.py were deleted).
 #   NOTE: src/rag/patches/deploy_webui.py (the OPTIONAL LightRAG web UI deployer) is now dead and needs
 #   lightrag if ever used — not part of the slide pipeline.
+prompt_toolkit>=3.0

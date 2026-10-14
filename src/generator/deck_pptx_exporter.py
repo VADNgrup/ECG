@@ -210,7 +210,7 @@ def _formula_fields(latex: str, light: bool, output_dir: Path) -> dict:
 
 # Builders that draw the slide's text as one list: they receive the two-level groups and render sub-bullets.
 _LIST_TYPES = {'bullets', 'imgleft', 'imgright', 'imgabove', 'imgbelow', 'twoimgleft', 'twoimgright',
-               'twoimgabove', 'twoimgbelow', 'formula', 'tblabove', 'codeside', 'codeabove'}
+               'twoimgabove', 'twoimgbelow', 'formula', 'tblabove', 'codeside', 'codeabove', 'figasset'}
 
 
 def _layout_log_to_slide(entry: dict, output_dir: Path, page_num: int) -> dict:
@@ -330,7 +330,7 @@ def _native_slide(entry: dict, output_dir: Path, page_num: int) -> dict:
     elif fn in ('comparison_layout', 'data_table_layout'):
         return {
             'type': 'cmptable', 'title': args.get('title', ''),
-            'table': {'table_markdown': args.get('table_markdown', '')},
+            'table': {'table_markdown': args.get('table_markdown', ''), 'table_caption': args.get('table_caption', '')},
             'parsed_table': args.get('parsed_table'),
             'is_light': light, 'page_num': page_num,
         }
@@ -357,6 +357,20 @@ def _native_slide(entry: dict, output_dir: Path, page_num: int) -> dict:
             **_formula_fields(args.get('latex_formula_block', ''), light, output_dir),
             'bullets': args.get('content', []), 'is_light': light, 'page_num': page_num,
         }
+
+    elif fn == 'figure_asset_layout':
+        slide = {
+            'type': 'figasset', 'title': args.get('title', ''),
+            'bullets': args.get('content', []), 'images': _resolve_imgs([args.get('img_path')], output_dir),
+            'caption': args.get('caption', ''), 'is_light': light, 'page_num': page_num,
+        }
+        if args.get('latex_formula_block'):
+            slide.update(_formula_fields(args['latex_formula_block'], light, output_dir))
+        else:
+            slide.update({'table': {'table_markdown': args.get('table_markdown', ''),
+                                    'table_caption': args.get('table_caption', '')},
+                          'parsed_table': args.get('parsed_table')})
+        return slide
 
     elif fn == 'formula_hero_layout':
         return {
@@ -692,35 +706,6 @@ def _native_slide(entry: dict, output_dir: Path, page_num: int) -> dict:
             'is_light': light, 'page_num': page_num,
         }
 
-    elif fn == 'end_with_image_layout':
-        imgs = _resolve_imgs([args.get('img_path', '')], output_dir)
-        items = args.get('meta_items') or [
-            {'k': 'Presented by', 'v': ''},
-            {'k': 'Q&A Session',  'v': 'Open discussion'},
-        ]
-        return {
-            'type': 'end_with_image',
-            'title':      args.get('end_text', 'Thank You'),
-            'images':     imgs,
-            'caption':    args.get('caption', ''),
-            'meta_items': items,
-            'is_light': light, 'page_num': page_num,
-        }
-
-    elif fn == 'end_image_hero_layout':
-        imgs = _resolve_imgs([args.get('img_path', '')], output_dir)
-        items = args.get('meta_items') or [
-            {'k': 'Presented by', 'v': ''},
-            {'k': 'Q&A Session',  'v': 'Open discussion'},
-        ]
-        return {
-            'type': 'end_image_hero',
-            'title':      args.get('end_text', 'Thank You'),
-            'images':     imgs,
-            'meta_items': items,
-            'page_num': page_num,
-        }
-
     # Fallback: render as bullets
     return {
         'type': 'bullets', 'title': args.get('title', ''),
@@ -816,7 +801,7 @@ _SAFE_FONTS = {
                               ['IBM Plex Mono', 'Space Mono', 'JetBrains Mono', 'Roboto Mono'])),
 }
 
-_DESIGN_SPEC_VERSION = 8  # bumped: +10 themes, random theme selection
+_DESIGN_SPEC_VERSION = 10  # bumped: decks open in a light theme; cached specs hold the theme
 _ALLOWED_RHYTHMS = ('anchor', 'dense', 'breathing')
 
 
@@ -916,7 +901,7 @@ def _design_spec_to_theme(spec: dict) -> dict:
 def generate_deck_theme(document_id: str, lecture_title: str, content_brief: str, n_slides: int,
                         force: bool = False) -> dict:
     """PUBLIC entry point -- called ONCE per export (not per slide). ZERO LLM cost: the theme is picked at
-    RANDOM from THEME_LIBRARY (seeded by document_id so it's stable per deck, varies across decks), never
+    RANDOM from the light themes of THEME_LIBRARY (seeded by document_id so it's stable per deck, varies across decks), never
     genre-matched by an LLM. `concept`/`motif`/`rhythm` used to come from an LLM call here, but JS never
     reads those fields (dead output -- verified: no `T.rhythm`/`T.motif`/`T.concept` in deck_pptx_gen.js),
     so that call was pure waste; removed. Still cached at data/assets/{document_id}/pptx_design_spec.json
@@ -934,8 +919,10 @@ def generate_deck_theme(document_id: str, lecture_title: str, content_brief: str
             pass
 
     chosen = os.getenv('PPTX_THEME', '')
+    # a deck opens in a light theme (easier to read); the dark ones stay embedded for the Design tab
+    light = [t for t in THEME_LIBRARY if t.get('default_mode') == 'light'] or THEME_LIBRARY
     rand_theme = chosen if chosen in {t['name'] for t in THEME_LIBRARY} else \
-        _random.Random(str(document_id)).choice(THEME_LIBRARY)['name']
+        _random.Random(str(document_id)).choice(light)['name']
     spec = _validate_and_fill_design_spec({'theme_name': rand_theme}, n_slides)
     print(f'[pptx_design_spec] theme (random, no LLM call): {rand_theme}')
 

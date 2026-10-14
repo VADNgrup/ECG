@@ -7,13 +7,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
-from src.rag.retrieve_content import find_heading_id, load_asset_headings, subtree_ids
+from src.rag.idea_candidates import scope_sentences
+from src.rag.retrieve_content import find_heading_id, find_heading_path, load_asset_headings, root_ids_of
 from src.utils.config import Config
 
 KB_DIR = Config.KB_CACHE_DIR
-SKIP_HEADING = re.compile(
-    r"^\W*(?:\d+[.)]?\s*)?(exercises?|references?|bibliography|index|acknowledg\w*|about the authors?|"
-    r"preface|foreword)\W*$", re.IGNORECASE)
+EXCLUDE_MARK = "!"      # a `root_heading` term naming a section left out of the deck ("Document;!Document > Methods")
+TITLE_TEXT = "="        # a `root_heading` term naming the text under the document's title, without its sections
 
 
 def find_kb_dir(document_id: str) -> Optional[Path]:
@@ -39,6 +39,7 @@ class ScopeOrchestrator:
         self.kb_dir = Path(kb_dir)
         self.headings: Dict[str, dict] = index.get("headings") or {}
         self.title_id = int(index.get("title_id", -1))
+        self.excluded: set = set()               # sections the `root_heading` leaves out (resolve_roots)
         self.children: Dict[int, List[int]] = defaultdict(list)
         for sid, heading in self.headings.items():
             parent = heading.get("parent")
@@ -52,33 +53,50 @@ class ScopeOrchestrator:
         return clean_display_title(self.title(hid))
 
     def visible(self, hid: int) -> bool:
-        """A heading the lecture may present (not exercises, index, preface, ...)."""
-        title = self.display(hid)
-        return bool(title) and not SKIP_HEADING.match(title)
+        """A heading the deck covers: all of them but those the `root_heading` leaves out."""
+        return hid not in self.excluded
+
+    def tops(self) -> List[int]:
+        """The document's top sections in order: the headings no section holds."""
+        held = lambda p: p is not None and int(p) != self.title_id and str(int(p)) in self.headings
+        return sorted((int(k) for k, h in self.headings.items() if int(k) != self.title_id and not held(h.get("parent"))),
+                      key=lambda i: self.headings[str(i)].get("order", 0))
+
+    def under(self, root: int) -> List[int]:
+        """The sections directly under a deck root: the title's are roots themselves."""
+        return [] if root == self.title_id else self.children.get(root, [])
+
+    def _title_has_text(self) -> bool:
+        """Whether sentences sit under the document's title, before its first heading."""
+        if str(self.title_id) not in self.headings or not (self.kb_dir / "structural_index.json").is_file():
+            return False
+        return bool((scope_sentences(self.kb_dir, self.index, {self.title_id}).get(self.title_id) or {}).get("sentences"))
+
+    def _whole(self, visible: Callable[[int], bool]) -> List[int]:
+        """Every root of the whole document: the text under its title and each top section."""
+        own = [self.title_id] if visible(self.title_id) and self._title_has_text() else []
+        return own + [i for i in self.tops() if visible(i)]
 
     def resolve_roots(self, root_heading: str | None, visible: Callable[[int], bool]) -> List[int]:
-        """Selected roots in document order, or every author top-level root for a full book."""
-        if root_heading:
+        """Selected roots in document order, or every root of the whole document (the document's title names that too;
+        TITLE_TEXT names only the text under it); a term starting with EXCLUDE_MARK leaves that section (and what is
+        under it) out of the scope."""
+        terms = [p.strip() for p in (root_heading or "").split(";") if p.strip()]
+        self.excluded = {self._named(t[len(EXCLUDE_MARK):].strip()) for t in terms if t.startswith(EXCLUDE_MARK)}
+        chosen = [t for t in terms if not t.startswith(EXCLUDE_MARK)]
+        if chosen:
             roots = []
-            for name in (p.strip() for p in root_heading.split(";") if p.strip()):
-                hid = find_heading_id(self.index, name)
-                if hid is None:
-                    candidates = [self.headings[k].get("title", "") for k in self.headings
-                                  if int(k) != self.title_id]
-                    raise ValueError(f"Requested heading not found: {name}. Available headings: {candidates[:30]}")
+            for name in chosen:
+                hid = self._named(name)
                 if not visible(hid):
                     raise ValueError(f"Requested heading is excluded from lecture content: {name}")
-                if hid not in roots:
-                    roots.append(hid)
+                whole = hid == self.title_id and name != TITLE_TEXT
+                roots += [r for r in (self._whole(visible) if whole else [hid]) if r not in roots]
         else:
-            candidates = [int(k) for k in self.headings if int(k) != self.title_id and visible(int(k))]
-            if not candidates:
-                return []
-            top_level = min(int(self.headings[str(i)].get("level", 1)) for i in candidates)
-            roots = [i for i in candidates if int(self.headings[str(i)].get("level", 1)) == top_level]
+            roots = self._whole(visible)
         roots.sort(key=lambda i: self.headings[str(i)].get("order", 0))
         for i, root in enumerate(roots):
-            descendants = subtree_ids(self.index, root) - {root}
+            descendants = root_ids_of(self.index, root) - {root}
             overlap = next((other for other in roots[i + 1:] if other in descendants), None)
             if overlap is not None:
                 raise ValueError(
@@ -86,17 +104,29 @@ class ScopeOrchestrator:
                     "Select the parent or the child, not both.")
         return roots
 
+    def _named(self, name: str) -> int:
+        """The heading a term of `root_heading` names: a path of titles, or one title."""
+        if name == TITLE_TEXT:
+            return self.title_id
+        hid = find_heading_path(self.index, name)
+        if hid is None:
+            hid = find_heading_id(self.index, name)
+        if hid is None:
+            candidates = [self.headings[k].get("title", "") for k in self.headings if int(k) != self.title_id]
+            raise ValueError(f"Requested heading not found: {name}. Available headings: {candidates[:30]}")
+        return hid
+
     def title(self, hid: int) -> str:
         return str((self.headings.get(str(hid)) or {}).get("title") or "")
 
     def root_of(self, hid: int, roots: Sequence[int]) -> int:
         for root in roots:
-            if hid in subtree_ids(self.index, root):
+            if hid in root_ids_of(self.index, root):
                 return root
         raise ValueError(f"Heading {hid} lies outside selected roots {list(roots)}")
 
     def ordered_scope(self, roots: Sequence[int], visible: Callable[[int], bool]) -> List[int]:
-        allowed = {hid for root in roots for hid in subtree_ids(self.index, root)}
+        allowed = {hid for root in roots for hid in root_ids_of(self.index, root)}
         root_set = set(roots)
 
         def path_visible(hid: int) -> bool:
@@ -110,8 +140,7 @@ class ScopeOrchestrator:
                 cur = int(parent) if parent is not None else None
             return False
 
-        return sorted((hid for hid in allowed if hid != self.title_id and path_visible(hid)),
-                      key=lambda i: self.headings[str(i)].get("order", 0))
+        return sorted((hid for hid in allowed if path_visible(hid)), key=lambda i: self.headings[str(i)].get("order", 0))
 
     def sections(self, roots: Sequence[int], ordered: Sequence[int], visible: Callable[[int], bool]) -> List[List[int]]:
         """Root introduction then one section per direct child, for any root depth/cardinality."""
@@ -120,16 +149,16 @@ class ScopeOrchestrator:
         for root in roots:
             if root in allowed:
                 out.append([root])
-            for child in self.children.get(root, []):
+            for child in self.under(root):
                 if not visible(child):
                     continue
-                ids = subtree_ids(self.index, child)
+                ids = root_ids_of(self.index, child)
                 section = [hid for hid in ordered if hid in ids]
                 if section:
                     out.append(section)
         return out
 
-    def manifest(self, roots: Sequence[int], ordered: Sequence[int], mode: str = "chapters") -> dict:
+    def manifest(self, roots: Sequence[int], ordered: Sequence[int]) -> dict:
         scope = set(ordered)
         assets = []
         for asset in load_asset_headings(self.kb_dir) or []:
@@ -140,17 +169,16 @@ class ScopeOrchestrator:
             if owner in scope:
                 assets.append({k: asset.get(k) for k in ("id", "node", "type", "page", "img_path", "caption")})
         return {
-            "mode": mode,
             "root_ids": list(roots),
             "roots": [{"id": r, "title": self.title(r), "order": self.headings[str(r)].get("order", 0),
-                       "heading_ids": [h for h in ordered if h in subtree_ids(self.index, r)]} for r in roots],
+                       "heading_ids": [h for h in ordered if h in root_ids_of(self.index, r)]} for r in roots],
             "document_order": list(ordered),
             "scope_boundaries": [
                 {"root_id": root, "first_heading_id": members[0], "last_heading_id": members[-1],
                  "start_order": self.headings[str(members[0])].get("order", 0),
                  "end_order": self.headings[str(members[-1])].get("order", 0)}
                 for root in roots
-                for members in [[h for h in ordered if h in subtree_ids(self.index, root)]] if members],
+                for members in [[h for h in ordered if h in root_ids_of(self.index, root)]] if members],
             "heading_tree": [{"id": h, "title": self.title(h),
                               "parent": self._rebased_parent(h, scope, roots),
                               "level": self.headings[str(h)].get("level"),

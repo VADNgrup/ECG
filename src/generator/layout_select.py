@@ -1,5 +1,7 @@
 """Content shape -> layout. A slide's points are typed by shape (definition, contrast, sequence, ...), each shape has
 ordered layout candidates, and the first candidate whose measured capacity holds the actual text wins."""
+import re
+import unicodedata
 from typing import Dict, List, Optional, Sequence
 
 from src.generator import fit_model as fm
@@ -42,6 +44,13 @@ def formula_min_h(lines: int = 1) -> float:
     return 0.25 + 0.4 * max(1, lines)
 
 
+def formula_lines(text: str) -> int:
+    """Lines of the stacked formulas, a blank line between two (deck_pptx_gen.js formulaLines)."""
+    text = str(text or "")
+    eqs = len([e for e in re.split(r"\n\s*\n", text) if e.strip()])
+    return max(1, len([t for t in text.split("\n") if t.strip()]) + max(0, eqs - 1))
+
+
 def table_min_h(rows: int) -> float:
     """Height a table of `rows` body rows needs at its smallest (tableFit's row minimums)."""
     return 0.42 + 0.32 * max(1, rows)
@@ -67,6 +76,22 @@ def _fits_text(text: str, w: float, h: float, min_fs: int) -> bool:
     return fm.est_lines(text, w, min_fs) * LINE(min_fs) + 0.06 <= h
 
 
+def _words(text: str) -> set:
+    return set(re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", str(text or "")).casefold()))
+
+
+def unnamed_terms(groups: Sequence[Dict[str, object]], formula_text: str) -> List[str]:
+    """Rows of an annotated formula whose title is not one of its terms: a term is written in the formula word for
+    word ("RMSE", "x₁"), or is the one word a one-letter symbol of the formula stands for ("Precision" for P); a
+    heading ("RMSE Overview", "Role in Linear Programming") is not."""
+    written = _words(formula_text)
+    symbols = {w for w in written if len(w) == 1}
+    def term(title: str) -> bool:
+        words = _words(title)
+        return bool(words) and (words <= written or (len(words) == 1 and next(iter(words))[:1] in symbols))
+    return [str(g.get("title") or "") for g in groups if not term(str(g.get("title") or ""))]
+
+
 def _blocks(groups: Sequence[Dict[str, object]]) -> List[Dict[str, object]]:
     return [{"title": str(g["title"]), "body": " ".join(g["items"]), "items": list(g["items"])} for g in groups]
 
@@ -89,7 +114,8 @@ MEASURED = frozenset({
     "key_points_layout", "concept_breakdown_layout", "three_cols_content_layout", "numbered_conclusions_layout",
     "steps_horizontal_layout", "timeline_vertical_layout", "comparison_columns_layout",
     "checklist_layout", "takeaway_panel_layout", "definition_callout_layout",
-    "formula_top_layout", "formula_annotated_layout", "table_above_layout", "nested_bullets_layout",
+    "formula_top_layout", "formula_below_layout", "formula_annotated_layout", "table_above_layout",
+    "nested_bullets_layout",
     "image_left_layout", "image_right_layout", "image_above_layout", "image_below_layout",
     "two_image_left_layout", "two_image_right_layout", "two_image_above_layout", "two_image_below_layout",
     "code_beside_layout", "code_above_layout",
@@ -141,6 +167,9 @@ def fits(layout: str, groups: Sequence[Dict[str, object]], content: Sequence[str
         if n != 2:
             return False
         col_w = (fm.BW - 0.4) / 2
+        if any(fm.est_lines(str(g.get("title") or ""), col_w - 2 * fm.COMP_HDR_PAD, fm.COMP_HDR_MIN_FS, "display", True) > 1
+               for g in groups):
+            return False                      # a side's label sits on one line of its header band
         return all(g["items"] and len(g["items"]) <= 4 and
                    all(_fits_text(t, col_w - 0.7, (2.87 / len(g["items"])) - 0.1, 12) for t in g["items"]) for g in groups)
     if layout == "checklist_layout":
@@ -153,19 +182,24 @@ def fits(layout: str, groups: Sequence[Dict[str, object]], content: Sequence[str
         return len(lead) <= 230 and (not rest or fm.fit_bullets(rest, 8.25, fm.BODY_H - 1.5 - 0.8, 16)["fs"] >= 12)
     if layout == "definition_callout_layout":
         return len(content) == 1 and len(content[0]) <= 850
-    if layout == "formula_top_layout":
+    if layout in ("formula_top_layout", "formula_below_layout"):       # one builder draws both (buildFormula)
         box = formula_min_h(int(extent.get("formula_lines") or 1))
         return not content or _list_fits(groups, content, fm.BW, _body_h(extent) - box - 0.15, 20)
     if layout == "formula_annotated_layout":
         if n < 1 or not all(str(g.get("title") or "").strip() for g in groups):
             return False                      # each row explains one named term; unlabelled points are a plain list
+        if extent.get("formula_text") and unnamed_terms(groups, str(extent["formula_text"])):
+            return False                      # a row titled by a heading, not by a term of the formula
         box = min(fm.BODY_H * 0.4, formula_min_h(int(extent.get("formula_lines") or 1)))
         row_h = (fm.BODY_H - box - 0.22 - 0.34) / n
         return all(_fits_text(b["body"], fm.BW - 2.0, row_h, 12) for b in blocks)
     if layout == "table_above_layout":
+        # the text under the table, or -- when the two cannot both be readable on one page -- a text page of its own
+        # after the table's (pptx_pipeline.build_manifest splits them), so the table never limits what the text holds
         body = _body_h(extent)
         room = min(body * TABLE_TEXT_MAX, body - table_min_h(int(extent.get("table_rows") or 3)) - 0.12)
-        return not content or _list_fits(groups, content, fm.BW, room, 16)
+        return not content or _list_fits(groups, content, fm.BW, room, 16) or fits("nested_bullets_layout", groups,
+                                                                                    content, extent)
     if layout == "nested_bullets_layout":
         nested_text = [str(item) for group in groups for item in group.get("items", [])] or list(content)
         return bool(nested_text) and _list_fits(groups, nested_text, fm.BW - 0.5, _body_h(extent) - 0.24, 22)

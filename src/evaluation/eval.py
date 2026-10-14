@@ -9,10 +9,16 @@ from pathlib import Path
 import jieba
 from jinja2 import Template
 from rouge_chinese import Rouge
+from rouge_chinese.rouge_score import _split_into_words
 from tqdm import tqdm
 
+from src.evaluation.render import SLIDE_IMAGES, render
+from src.generator.slide_gen import output_name
+from src.rag.chapter_map import load_chapters
+from src.rag.kb_files import load_structural_index
 from src.utils.config import Config
 from src.utils.llm import b64_image, chat, vision_chat
+from src.workflow.scope import ScopeOrchestrator, find_kb_dir
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -24,6 +30,16 @@ EVAL_BASE_URL = Config.EVAL_BASE_URL
 EVAL_API_KEY = Config.EVAL_API_KEY
 _PROMPT_DIR = Path(__file__).parent / 'prompts'
 
+def scope_text(meta: dict) -> str:
+    """The text of the part of its document a deck covers (`root_heading`): a deck of one document of a collection is
+    compared with that document, not with the whole collection."""
+    kb_dir = find_kb_dir(meta['source_document_id'])
+    index = load_structural_index(kb_dir)
+    scope = ScopeOrchestrator(index, kb_dir)
+    chapters = load_chapters(kb_dir, index, scope.resolve_roots(meta.get('root_heading'), scope.visible), scope.visible)
+    return "\n\n".join(c.text_of(p["pid"]) for c in chapters for p in c.paragraphs)
+
+
 def parse_full_text(context_path: Path):
     with open(context_path, 'r', encoding='utf-8') as f:
         full_context = f.read()
@@ -31,26 +47,7 @@ def parse_full_text(context_path: Path):
     full_text = context_json['text_content']['markdown']
     return full_text
 
-def extract_institution(markdown: str) -> str:
-    fn_match = re.search(r'(\[\^\d+\]:.*?)(?=\n##|\Z)', markdown, re.DOTALL)
-    search_text = fn_match.group(1) if fn_match else markdown[:3000]
-    # Prefer "University of X" / "X University" patterns (most specific)
-    for pattern in [
-        r'University\s+of\s+[\w\s]{3,50}',
-        r'[\w\s]{3,40}\s+University',
-        r'Institute\s+of\s+[\w\s]{3,50}',
-        r'[\w\s]{3,40}\s+Institute\s+of\s+Technology',
-        r'College\s+of\s+[\w\s]{3,40}',
-        r'(?:Research\s+)?(?:Center|Centre)\s+(?:for|of)\s+[\w\s]{3,50}',
-    ]:
-        m = re.search(pattern, search_text, re.I)
-        if m:
-            result = m.group(0).strip().rstrip('., ')
-            if len(result) >= 8:
-                return result
-    return ''
-
-def parse_full_slides(output_lecture_path: str, institution: str = '') -> str:
+def parse_full_slides(output_lecture_path: str) -> str:
     output_lecture_path = Path(output_lecture_path)
     image_path = output_lecture_path.parent / (output_lecture_path.stem + '_image_distribution.json')
     table_distribution_path = output_lecture_path.parent / (output_lecture_path.stem + '_table_distribution.json')
@@ -71,7 +68,6 @@ def parse_full_slides(output_lecture_path: str, institution: str = '') -> str:
     total_slides = lecture_json['metadata']['total_slides']
     parts = []
     meta = lecture_json.get('metadata', {})
-    institution = institution or meta.get('institution', '')
     context_lines = [
         f"Presentation title: {lecture_json.get('lecture_title', output_lecture_path.stem)}",
         f"Source document: {meta.get('source_file') or meta.get('source_document_id') or output_lecture_path.stem}",
@@ -79,22 +75,7 @@ def parse_full_slides(output_lecture_path: str, institution: str = '') -> str:
     ]
     if meta.get('speaker_information'):
         context_lines.append(f"Speaker: {meta.get('speaker_information')}")
-    if institution:
-        context_lines.append(f"Institution: {institution}")
-    if meta.get('presentation_date'):
-        context_lines.append(f"Presentation date: {meta.get('presentation_date')}")
     parts.append('\n'.join(context_lines))
-    speaker = meta.get('speaker_information', '')
-    pdate = meta.get('presentation_date', '')
-    if speaker or pdate:
-        cover_lines = [f'Slide 0 of {total_slides}', f'Title: {lecture_json.get("lecture_title", "")}']
-        if speaker:
-            cover_lines.append(f'Presented by: {speaker}')
-        if institution:
-            cover_lines.append(f'Institution: {institution}')
-        if pdate:
-            cover_lines.append(f'Date: {pdate}')
-        parts.append('\n'.join(cover_lines))
     for slide_entry in lecture_json['slides']:
         slide_meta = slide_entry['slide']
         slide_number = slide_meta['slide_number']
@@ -106,35 +87,40 @@ def parse_full_slides(output_lecture_path: str, institution: str = '') -> str:
         for caption in table_map.get(slide_number, []):
             lines.append(f'Table: {caption}')
         parts.append('\n'.join(lines))
-    if speaker or institution or pdate:
-        closing_lines = [
-            f'Slide {total_slides + 1} of {total_slides}',
-            'Title: Conclusion and Acknowledgments',
-        ]
-        if speaker:
-            closing_lines.append(f'Presented by: {speaker}')
-        if institution:
-            closing_lines.append(f'Institution: {institution}')
-        if pdate:
-            closing_lines.append(f'Date: {pdate}')
-        closing_lines.append('The authors acknowledge all contributors and reviewers of this work.')
-        closing_lines.append('Thank you for your attention. Questions are welcome.')
-        parts.append('\n'.join(closing_lines))
     return '\n----\n'.join(parts)
 
-# rouge_chinese's rouge-l LCS table is a plain Python dict (not numpy), so memory cost scales far
-# faster than n*m*8 bytes; skip rather than risk OOM once the table would exceed this many cells.
-_ROUGE_MAX_TABLE_CELLS = 100_000_000
+_ROUGE_EPS = 1e-8          # rouge_chinese's own term in its F formula
+
+
+def _lcs_length(a: list, b: list) -> int:
+    """Length of the longest common subsequence of two token lists, bit-parallel (Hyyrö): one len(a)-bit integer
+    instead of rouge_chinese's len(a) x len(b) table, the same length."""
+    masks: dict = {}
+    for i, token in enumerate(a):
+        masks[token] = masks.get(token, 0) | (1 << i)
+    full = (1 << len(a)) - 1
+    v = full
+    for token in b:
+        u = v & masks.get(token, 0)
+        v = ((v + u) | (v - u)) & full
+    return len(a) - v.bit_count()
+
+
+def _rouge_words(text: str) -> list:
+    """The words rouge_chinese scores: the jieba tokens of `text`, cut into its sentences and split as it splits them."""
+    sentences = [' '.join(s.split()) for s in rouge.cut_sent(' '.join(jieba.cut(str(text)))) if len(s) > 0]
+    return _split_into_words(sentences)
+
 
 def rouge_l_score(source_text: str, presentation: str):
-    source_tokens = list(jieba.cut(str(source_text)))
-    presentation_tokens = list(jieba.cut(str(presentation)))
-    if len(source_tokens) * len(presentation_tokens) > _ROUGE_MAX_TABLE_CELLS:
-        print(f'[WARN] Skipping ROUGE-L: {len(source_tokens)} source tokens x {len(presentation_tokens)} presentation tokens exceeds safe limit ({_ROUGE_MAX_TABLE_CELLS}), risk of MemoryError')
+    """ROUGE-L F exactly as rouge_chinese computes it (summary level: the LCS of the whole word sequences), the LCS
+    taken bit-parallel so no document is too long to score; None when either side has no words."""
+    ref, hyp = _rouge_words(source_text), _rouge_words(presentation)
+    if not ref or not hyp:
         return None
-    source = ' '.join(source_tokens)
-    presentation = ' '.join(presentation_tokens)
-    return rouge.get_scores(presentation, source)[0]['rouge-l']['f']
+    llcs = _lcs_length(ref, hyp)
+    r, p = llcs / len(ref), llcs / len(hyp)
+    return 2.0 * ((p * r) / (p + r + _ROUGE_EPS))
 
 def extract_json_from_response(response: str) -> dict:
     match = re.search('```(?:json)?\\n?(.*?)\\n?```', response, re.DOTALL)
@@ -237,52 +223,67 @@ def coherence_score(presentation: str) -> dict:
 def _load_prompt(filename: str) -> Template:
     return Template((_PROMPT_DIR / filename).read_text(encoding='utf-8'))
 
-def eval(model):
-    lecture_ids = os.listdir(OUTPUT_DIR)
-    val_saves = []
-    for lecture_id in tqdm(lecture_ids, desc='Evaluating lectures'):
+def eval(model, only=''):
+    """Scores every deck under OUTPUT_DIR, or with `only` the lectures whose id starts with it (their lecture files in
+    LECTURES_DIR, their decks in OUTPUT_DIR); slide pictures are rendered from the deck when there are none."""
+    Config.ensure_dirs()
+    lecture_ids = sorted(p.name for p in Config.LECTURES_DIR.iterdir() if p.name.startswith(only)) if only else os.listdir(OUTPUT_DIR)
+    val_saves, todo = [], []
+    for lecture_id in lecture_ids:
         if lecture_id == '.gitkeep':
-            print('Skipping .gitkeep')
             continue
-        save_path = OUTPUT_DIR / lecture_id / f'{model}' / f'eval_{lecture_id}.json'
-        if save_path.exists():
-            print('Skipping lecture', lecture_id)
-            with save_path.open('r', encoding='utf-8') as f:
-                val_save = json.load(f)
-            val_saves.append(val_save)
-            continue
+        deck_dir = OUTPUT_DIR / (output_name(lecture_id) if only else lecture_id) / f'{model}'
+        save_path = deck_dir / f'eval_{lecture_id}.json'
+        deck = deck_dir / f'{deck_dir.parent.name}.pptx'
+        if save_path.exists() and not (deck.exists() and save_path.stat().st_mtime < deck.stat().st_mtime):
+            with save_path.open('r', encoding='utf-8') as f:               # scored after its deck was made: kept
+                val_saves.append(json.load(f))
         else:
-            output_lecture_path = OUTPUT_DIR / lecture_id / f'{model}' / f'{lecture_id}.json'
-            # Ablation-mode lecture_ids are suffixed (e.g. "<doc>__abl3") and don't match the
-            # shared, unsuffixed context filename on disk — resolve the true source document id
-            # from the lecture's own saved metadata instead of assuming lecture_id == document_id.
-            document_id = lecture_id
-            if output_lecture_path.exists():
-                try:
-                    with output_lecture_path.open('r', encoding='utf-8') as f:
-                        document_id = json.load(f).get('metadata', {}).get('source_document_id', lecture_id)
-                except Exception:
-                    document_id = lecture_id
-            context_path = CONTEXT_DIR / f'{document_id}.json'
-            if not context_path.exists():
-                print('Not have information of:', lecture_id)
-                continue
-            slide_image_path = OUTPUT_DIR / lecture_id / model / 'slide_images'
+            todo.append(lecture_id)
+    print(f'{len(val_saves)} lectures already scored, {len(todo)} to score')
+    for lecture_id in tqdm(todo, desc='Evaluating lectures'):
+        deck_dir = OUTPUT_DIR / (output_name(lecture_id) if only else lecture_id) / f'{model}'
+        save_path = deck_dir / f'eval_{lecture_id}.json'
+        deck = deck_dir / f'{deck_dir.parent.name}.pptx'
+        older = lambda path: deck.exists() and path.stat().st_mtime < deck.stat().st_mtime   # made before the deck
+        output_lecture_path = OUTPUT_DIR / lecture_id / f'{model}' / f'{lecture_id}.json'
+        if not output_lecture_path.exists():
+            output_lecture_path = Config.LECTURES_DIR / lecture_id / f'{lecture_id}.json'
+        # Ablation-mode lecture_ids are suffixed (e.g. "<doc>__abl3") and don't match the
+        # shared, unsuffixed context filename on disk — resolve the true source document id
+        # from the lecture's own saved metadata instead of assuming lecture_id == document_id.
+        document_id = lecture_id
+        if output_lecture_path.exists():
             try:
-                source_text = parse_full_text(context_path)
-                institution = extract_institution(source_text)
-                presentation = parse_full_slides(output_lecture_path, institution=institution)
-                rouge_score_val = rouge_l_score(source_text, presentation)
-                content_score_val = content_score(slide_image_path)
-                design_score_val = design_score(slide_image_path)
-                coherence_score_val = coherence_score(presentation)
-                val_save = {'rouge_score': rouge_score_val, 'content_score': content_score_val, 'design_score': design_score_val, 'coherence_score': coherence_score_val}
-                val_saves.append(val_save)
-                json.dump(val_save, open(save_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-            except Exception as e:
-                print(f'[ERROR] Failed to evaluate {lecture_id}: {e}')
-            finally:
-                gc.collect()
+                with output_lecture_path.open('r', encoding='utf-8') as f:
+                    document_id = json.load(f).get('metadata', {}).get('source_document_id', lecture_id)
+            except Exception:
+                document_id = lecture_id
+        context_path = CONTEXT_DIR / f'{document_id}.json'
+        if not context_path.exists():
+            print('Not have information of:', lecture_id)
+            continue
+        slide_image_path = deck_dir / SLIDE_IMAGES
+        try:
+            meta = json.loads(output_lecture_path.read_text(encoding='utf-8')).get('metadata', {})
+            source_text = scope_text(meta) if meta.get('root_heading') else parse_full_text(context_path)
+            pictures = list(slide_image_path.glob('*.png'))
+            if deck.exists() and (not pictures or any(older(p) for p in pictures)):
+                for p in pictures:                      # pictures of an earlier deck
+                    p.unlink()
+                render(deck, slide_image_path)
+            presentation = parse_full_slides(output_lecture_path)
+            rouge_score_val = rouge_l_score(source_text, presentation)
+            content_score_val = content_score(slide_image_path)
+            design_score_val = design_score(slide_image_path)
+            coherence_score_val = coherence_score(presentation)
+            val_save = {'rouge_score': rouge_score_val, 'content_score': content_score_val, 'design_score': design_score_val, 'coherence_score': coherence_score_val}
+            val_saves.append(val_save)
+            json.dump(val_save, open(save_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f'[ERROR] Failed to evaluate {lecture_id}: {e}')
+        finally:
+            gc.collect()
     print('======== ALL EVALUATION=======\n')
     if not val_saves:
         print('No evaluations completed.')
@@ -296,6 +297,8 @@ def eval(model):
         if c is not None:
             valid_coherence.append(c if isinstance(c, int) else c.get('score', 0))
     total_attempted = len([x for x in lecture_ids if x not in ('.gitkeep', '.DS_Store')])
+    if valid_rouge:
+        print('Rouge per deck:', [round(v['rouge_score'], 3) for v in val_saves if v.get('rouge_score') is not None])
     if total_attempted > 0:
         print(f'Success/Valid Rate: {len(valid_content) / total_attempted * 100:.2f}% ({len(valid_content)}/{total_attempted})')
     if valid_rouge:
@@ -310,7 +313,8 @@ def eval(model):
 def main():
     parser = argparse.ArgumentParser(description='Evaluation with PPTEval Framework')
     parser.add_argument('--model', required=True)
+    parser.add_argument('--only', default='', help='Score only the lectures whose id starts with this (e.g. a collection)')
     args = parser.parse_args()
-    eval(args.model)
+    eval(args.model, args.only)
 if __name__ == '__main__':
     main()

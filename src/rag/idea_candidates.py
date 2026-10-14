@@ -9,7 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from src.rag.kg_salience import load_salience
 from src.rag.kg_schema import is_semantic_node
 from src.rag.retrieve_content import (cached_heading_evidence, filter_sentences, load_kg_graph, load_structural_index,
                                       sentence_units)
@@ -112,8 +111,6 @@ def build_candidates(kb_dir: Path, scope: Set[int], index: dict | None = None,
         heading_members[owner[n]].append(n)
     local_centrality = {n: sum(neighbors[n].get(m, 0.0) for m in heading_members[owner[n]] if m != n) for n in names}
     local_norm = _minmax(local_centrality)
-    salience_raw = load_salience(kb_dir) or {}
-    salience_norm = _minmax({n: salience_raw.get(concepts[n], 0.0) for n in names})
     w_freq, w_focus, w_degree, w_title, w_early = Config.KG_IDEA_WEIGHTS
     scored = []
     for n in names:
@@ -122,7 +119,7 @@ def build_candidates(kb_dir: Path, scope: Set[int], index: dict | None = None,
         first = min(position[s] for s in mentions[n]) / total
         score = (w_freq * freq[n] + w_focus * own / len(mentions[n]) + w_degree * degree[n]
                  + w_title * float(titled) + w_early * (1 - first)
-                 + Config.KG_IDEA_LOCAL_WEIGHT * local_norm[n] + Config.KG_IDEA_SALIENCE_WEIGHT * salience_norm[n])
+                 + Config.KG_IDEA_LOCAL_WEIGHT * local_norm[n])
         generic = len(mentions[n]) / total > Config.KG_GENERIC_SPREAD
         if generic:
             score *= 0.3

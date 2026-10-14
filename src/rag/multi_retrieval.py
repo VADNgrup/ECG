@@ -24,7 +24,7 @@ class ChapterRetrieval:
     def sentences(self, query: str, keywords: Sequence[str] = (), k: int = 8, exclude: Iterable[str] = ()) -> List[dict]:
         """Top sentences of the chapter for `query`, each with its paragraph id."""
         hits = self.store.retrieve_scoped(query, self.chapter.heading_ids, keywords=list(keywords) or self.keywords(query),
-                                          k=k, exclude=exclude, role="chapters", gated=False)
+                                          k=k, exclude=exclude, role="packets", gated=False)
         return [{**h, "pid": self.chapter.pid_of.get(h["id"])} for h in hits if h["id"] in self.chapter.pid_of]
 
     def paragraphs(self, query: str, keywords: Sequence[str] = (), k: int = 4) -> List[Tuple[str, float]]:

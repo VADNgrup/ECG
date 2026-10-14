@@ -1,5 +1,6 @@
 """Lecture JSON + distributed assets -> native editable PPTX, without browser/HTML."""
 import json
+import random
 import re
 import subprocess
 from datetime import datetime
@@ -8,14 +9,18 @@ from pathlib import Path
 from PIL import Image
 
 from src.generator import deck_pptx_exporter
+from src.generator import fit_model as fm
+from src.generator import layout_select
 from src.generator.layout_frames import all_layouts
 from src.generator.layout_purpose import LAYOUT_PURPOSE
 from src.generator.layout_registry import IMAGE_CONTENT_LAYOUTS, layout_for_content
 from src.generator.pptx_verify import verify_pptx
 from src.rag.asset_validation import validate_formula, validate_table
 from src.rag.figure_captions import own_caption
+from src.utils import collection
 from src.utils.config import Config
 from src.utils.content_cache import PIPELINE_VERSION
+from src.workflow.deck_title import book_title
 
 
 def _read(path, default):
@@ -197,6 +202,16 @@ def _layout_args(layout_id, title, content, groups, images, table_data, formula,
     return args
 
 
+def _asset_page(layout_id, heading, table_data, formula, light, json_dir, number, section, source_num, heading_id):
+    """A page that shows one asset of a slide alone (its table or its formulas), titled as the slide."""
+    page = deck_pptx_exporter._layout_log_to_slide(
+        {"layout_function_name": layout_id,
+         "args": _layout_args(layout_id, heading, [], [], [], table_data, formula, light)}, json_dir, number)
+    page.update({"title": heading, "layout_id": layout_id, "section": section, "source_slide_number": source_num,
+                 "source_heading_id": heading_id})
+    return page
+
+
 def _image_layout(layout_id, images):
     """A wide figure takes the full width above its text; a tall or square one sits beside it."""
     if layout_id == "image_right_layout" and len(images) == 1:
@@ -235,6 +250,68 @@ def embedded_deck_themes() -> list[dict]:
         for item in deck_pptx_exporter.THEME_LIBRARY]
 
 
+def contents_entries(dividers: list[dict], slides: list[dict]) -> list[dict]:
+    """What Contents lists: the deck's own first level that branches -- its dividers when it has several, else its
+    content slides (the pieces of one split slide, sharing its title, listed once); nothing when nothing branches."""
+    level = dividers if len(dividers) > 1 else         [s for i, s in enumerate(slides) if i == 0 or s["title"] != slides[i - 1]["title"]]
+    return level if len(level) > 1 else []
+
+
+def source_title(meta: dict, title: str) -> str:
+    """The document a deck is made from: a collection's document its scope names, else the PDF's own title, else the
+    deck's title."""
+    file = meta.get("source_file") or ""
+    manifest = collection.manifest_of(file) if file else None
+    if manifest:
+        named = next((d["title"] for d in manifest["documents"] if d["title"] == meta.get("root_heading")), "")
+        if named:
+            return named
+    return book_title(file) or title
+
+
+# a heading's own label and number ahead of its name: one word, a number (digits or Roman), a full stop
+# ("Chapter 3. Classification" -> "Chapter 3", "3", "Classification")
+DIVIDER_HEAD = re.compile(r"^(\S+\s+([\dIVXLCDM]+))\.\s+(.+)$")
+
+
+def divider_variant(lecture_id) -> int:
+    """The divider design a deck draws all its dividers in: chosen per deck like its theme (fixed for a deck, varied
+    across decks), one of the renderer's DIVIDER_VARIANTS."""
+    return random.Random(f"{lecture_id}|divider").randrange(fm.DIVIDER_VARIANTS)
+
+
+# The closing designs the renderer draws, each with the parts it shows: (type, variant, parts). Every closing slide
+# shows the deck's source when it has one; the recap only where a design has room for it beside the thanks (a recap
+# filling the slide reads as a content slide, not a thanks).
+END_DESIGNS = (tuple(("end", v, {"recap", "source"}) for v in range(fm.END_VARIANTS))
+               + (("end_credits", 0, {"source"}), ("end_contact", 0, {"source"}), ("end_gradient", 0, {"source"})))
+END_REQUIRED = {"source"}
+
+
+def end_design(lecture_id, parts) -> tuple:
+    """(type, variant) of the closing slide a deck ends with: one of the designs that shows every required part it has
+    (its source line), chosen per deck like its cover and dividers."""
+    need = set(parts) & END_REQUIRED
+    fits = [(kind, v) for kind, v, shows in END_DESIGNS if need <= shows]
+    return random.Random(f"{lecture_id}|end").choice(fits)
+
+
+# the cover designs a deck may open with (deck_pptx_gen.js builders that show the title, speaker, institution and date
+# on the theme's background; the full-bleed accent cover is left out, like the full-bleed divider)
+COVER_TYPES = ("cover", "cover_split", "cover_editorial", "cover_minimal")
+
+
+def cover_type(lecture_id) -> str:
+    """The cover design a deck opens with: chosen per deck like its theme and its dividers."""
+    return random.Random(f"{lecture_id}|cover").choice(COVER_TYPES)
+
+
+def divider_head(heading: str):
+    """(kicker, number, name) of a divider's heading; ("", "", heading) when it carries no label and number."""
+    m = DIVIDER_HEAD.match(heading)
+    return (m.group(1), m.group(2), m.group(3)) if m else ("", "", heading)
+
+
 def build_manifest(json_path, *, title=None, speaker="", institution=""):
     json_path = Path(json_path)
     data = _read(json_path, {})
@@ -247,13 +324,20 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
     for suffix, target in (("image", images), ("table", tables)):
         for row in _read(json_path.parent / f"{lecture_id}_{suffix}_distribution.json", []):
             target.setdefault(int(row["slide_number"]), []).append(row)
-    slides = [{"type": "cover", "title": title, "speaker": speaker, "institution": institution,
-               "is_light": light, "layout_id": "cover_split_layout"}]
+    slides = [{"type": cover_type(lecture_id), "title": title, "speaker": speaker, "author": speaker,
+               "institution": institution, "is_light": light, "layout_id": "cover_split_layout"}]
     toc_entries = []
+    recap = []                   # the chapters' goals, in deck order: the closing slide's summary
+    slide_entries = []           # the content slides, for a deck with no more than one divider
     audit = []
     layout_notes = []
     used_images = set()
     sections: dict = {}          # scope root id -> its running-header label ("Chapter 3 · Classification")
+    kickers: dict = {}           # scope root id -> its divider's kicker ("Chapter 3"), for the dividers inside it
+    variant = divider_variant(lecture_id)
+    own = lambda info: (info.get("grounding") or {}).get("scope_root_id") == info.get("kg_node_id")
+    total = sum(1 for e in entries if e.get("slide", {}).get("is_section_opener") and own(e.get("slide", {})))
+    ordinal = 0
     for entry in entries:
         info = entry.get("slide", {})
         source_num = int(info.get("slide_number", 0))
@@ -267,16 +351,25 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
         groups = _groups(entry)
         root = (info.get("grounding") or {}).get("scope_root_id")
         if info.get("is_section_opener"):
+            kicker, number, name = divider_head(heading)
             if root is not None and root == info.get("kg_node_id"):
                 sections[root] = re.sub(r"^(\S+\s+\d+)\.\s+", r"\1 · ", heading)
-            slides.append({"type": "section-divider", "title": heading,
+                kickers[root] = kicker
+                ordinal += 1
+            else:                            # a part inside a chapter: the chapter's kicker, no number of its own
+                kicker, number, name = kickers.get(root, ""), "", heading
+            slides.append({"type": "section-divider", "title": name, "kicker": kicker, "number": number,
+                           "agenda": list((info.get("grounding") or {}).get("agenda") or []),
+                           "variant": variant, "section_num": ordinal, "section_total": total,
                            "source_slide_number": source_num,
                            "source_heading_id": info.get("kg_node_id"), "is_light": light,
                            "layout_id": "section_divider_layout"})
             toc_entries.append({"title": heading, "source_slide_number": source_num})
+            recap += [g for g in (info.get("grounding") or {}).get("agenda") or [] if g not in recap]
             audit.append({"slide_number": source_num, "kind": "section-divider",
                           "density": None, "support": "exempt", "layout_eligible": True})
             continue
+        slide_entries.append({"title": heading, "source_slide_number": source_num})
         content = entry.get("content", [])
         if isinstance(content, str):
             content = [content]
@@ -335,69 +428,138 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
                                      "reason": f"invalid table removed: {table_check.get('validation_reason')}"})
                 table_data = None
         distributed = tables.get(source_num, [])
-        # A table reconstructed and validated in the KG is authoritative.
-        # The distribution cache predates structured-table validation and may
-        # contain the collapsed OCR header that the normalizer has repaired.
+        # A table validated in the KG is authoritative; the distribution cache predates structured-table validation.
         has_validated_table = bool(
             isinstance(table_data, dict)
-            and (table_data.get("structured_table") or table_data.get("validation_status") in {"valid", "repaired"})
+            and (table_data.get("structured_table") or table_data.get("validation_status") == "valid")
         )
         if distributed and not has_validated_table:
             table_data = {"table_markdown": distributed[0].get("table_data", ""),
                           "table_caption": distributed[0].get("table_caption", "")}
-        requested = entry.get("layout_hint") or "only_content"
-        formula_layouts = {"formula_top_layout", "formula_below_layout", "formula_hero_layout", "formula_annotated_layout"}
-        table_layouts = {"table_above_layout", "table_highlight_layout", "data_table_layout"}
-        if formula and requested not in formula_layouts:
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "formula_top_layout",
-                                 "reason": "slide has a formula the requested layout cannot show"})
-            requested = "formula_top_layout"
-        elif table_data and requested not in table_layouts:
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "table_above_layout",
-                                 "reason": "slide has a table the requested layout cannot show"})
-            requested = "table_above_layout"
-        elif not formula and requested in formula_layouts:
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "only_content",
-                                 "reason": "formula layout without a formula"})
-            requested = "only_content"
-        if requested == "formula_annotated_layout" and not all(
-                len(re.sub(r"\W+", "", str(g.get("title") or ""))) >= 1 for g in entry.get("groups") or [{}]):
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "formula_top_layout",
-                                 "reason": "an annotated formula needs a named term per point"})
-            requested = "formula_top_layout"
-        code = info.get("code_block") if not (formula or table_data or assigned_images) else None
-        code_layouts = {"code_beside_layout", "code_above_layout"}
-        if code and requested not in code_layouts:
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "code_beside_layout",
-                                 "reason": "slide has a code listing the requested layout cannot show"})
-            requested = "code_beside_layout"
-        elif not code and requested in code_layouts:
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "nested_bullets_layout",
-                                 "reason": "code layout without a code listing on this slide"})
-            requested = "nested_bullets_layout"
-        spec = LAYOUT_PURPOSE.get(requested)
-        if spec and spec.unit == "points" and len(groups) < spec.min_blocks:
-            layout_notes.append({"slide": source_num, "asked": requested, "used": "nested_bullets_layout",
-                                 "reason": f"{len(groups)} block(s) drawn; the layout needs {spec.min_blocks}"})
-            requested = "nested_bullets_layout"
-        if requested in IMAGE_CONTENT_LAYOUTS and not assigned_images:
-            visual_plan = (entry.get("layout_structure") or {}).get("visual_plan") or {}
-            fallback = "nested_bullets_layout"         # keeps the slide's title; a big statement would drop it
-            layout_notes.append({"slide": source_num, "asked": requested, "used": fallback,
-                                 "reason": (f"{visual_plan.get('type', 'image')} unavailable; "
-                                            f"native fallback {visual_plan.get('fallback', 'native composition')}")})
-            requested = fallback
-        layout_id = _image_layout(layout_for_content(requested, len(assigned_images)), assigned_images)
-        args = _layout_args(layout_id, heading, content, groups, assigned_images,
-                            table_data, formula, light, assigned_captions, entry.get("layout_structure"), code)
-        native = deck_pptx_exporter._layout_log_to_slide({"layout_function_name": layout_id, "args": args},
-                                      json_path.parent, len(slides) + 1)
+        further = list(info.get("more_tables") or [])
+        if formula and table_data:                 # a slide draws its formula; its table takes a page of its own after it
+            further.insert(0, table_data)
+            table_data = None
+        beside = None              # the figure beside its formula or table, the text under both, when all are readable
+        if len(assigned_images) == 1 and (formula or table_data):
+            page = deck_pptx_exporter._layout_log_to_slide(
+                {"layout_function_name": "figure_asset_layout",
+                 "args": _layout_args("figure_asset_layout", heading, content, groups, assigned_images, table_data,
+                                      formula, light, assigned_captions, entry.get("layout_structure"))},
+                json_path.parent, len(slides) + 1)
+            table = None if formula else (page.get("parsed_table")
+                                          or fm.parse_md_table((page.get("table") or {}).get("table_markdown", "")))
+            caption = "" if formula else ((table or {}).get("caption") or (page.get("table") or {}).get("table_caption"))
+            if page.get("images") and fm.figure_asset_plan(page.get("groups") or [], page.get("bullets") or content,
+                                                           heading, page.get("formula_text", ""), table, caption)["ok"]:
+                beside = page
+        if assigned_images and (formula or table_data) and beside is None:
+            # a figure and a formula or table that cannot both be readable with the text: the formula or table alone,
+            # then the text beside its figure
+            alone = "formula_top_layout" if formula else "data_table_layout"
+            slides.append(_asset_page(alone, heading, None if formula else table_data, formula, light,
+                                      json_path.parent, len(slides) + 1, sections.get(root, ""), source_num,
+                                      info.get("kg_node_id")))
+            layout_notes.append({"slide": source_num, "asked": entry.get("layout_hint"), "used": f"{alone} + image",
+                                 "reason": "the slide's figure and its formula or table each need a page"})
+            formula, table_data = "", None
+        if beside is not None:
+            layout_id, native = "figure_asset_layout", beside
+            layout_notes.append({"slide": source_num, "asked": entry.get("layout_hint"), "used": layout_id,
+                                 "reason": "the figure and its formula or table are readable side by side"})
+        else:
+            requested = entry.get("layout_hint") or "only_content"
+            formula_layouts = {"formula_top_layout", "formula_below_layout", "formula_hero_layout", "formula_annotated_layout"}
+            table_layouts = {"table_above_layout", "table_highlight_layout", "data_table_layout"}
+            if formula and requested not in formula_layouts:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "formula_top_layout",
+                                     "reason": "slide has a formula the requested layout cannot show"})
+                requested = "formula_top_layout"
+            elif table_data and requested not in table_layouts:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "table_above_layout",
+                                     "reason": "slide has a table the requested layout cannot show"})
+                requested = "table_above_layout"
+            elif not formula and requested in formula_layouts:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "only_content",
+                                     "reason": "formula layout without a formula"})
+                requested = "only_content"
+            if not table_data and requested in table_layouts:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "nested_bullets_layout",
+                                     "reason": "its table has a page of its own"})
+                requested = "nested_bullets_layout"
+            if requested == "formula_annotated_layout" and (
+                    not all(len(re.sub(r"\W+", "", str(g.get("title") or ""))) >= 1 for g in entry.get("groups") or [{}])
+                    or layout_select.unnamed_terms(entry.get("groups") or [], formula)):
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "formula_top_layout",
+                                     "reason": "an annotated formula needs a named term per point"})
+                requested = "formula_top_layout"
+            code = info.get("code_block") if not (formula or table_data or assigned_images) else None
+            code_layouts = {"code_beside_layout", "code_above_layout"}
+            if code and requested not in code_layouts:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "code_beside_layout",
+                                     "reason": "slide has a code listing the requested layout cannot show"})
+                requested = "code_beside_layout"
+            elif not code and requested in code_layouts:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "nested_bullets_layout",
+                                     "reason": "code layout without a code listing on this slide"})
+                requested = "nested_bullets_layout"
+            spec = LAYOUT_PURPOSE.get(requested)
+            if spec and spec.unit == "points" and len(groups) < spec.min_blocks:
+                layout_notes.append({"slide": source_num, "asked": requested, "used": "nested_bullets_layout",
+                                     "reason": f"{len(groups)} block(s) drawn; the layout needs {spec.min_blocks}"})
+                requested = "nested_bullets_layout"
+            if requested in IMAGE_CONTENT_LAYOUTS and not assigned_images:
+                visual_plan = (entry.get("layout_structure") or {}).get("visual_plan") or {}
+                fallback = "nested_bullets_layout"         # keeps the slide's title; a big statement would drop it
+                layout_notes.append({"slide": source_num, "asked": requested, "used": fallback,
+                                     "reason": (f"{visual_plan.get('type', 'image')} unavailable; "
+                                                f"native fallback {visual_plan.get('fallback', 'native composition')}")})
+                requested = fallback
+            layout_id = _image_layout(layout_for_content(requested, len(assigned_images)), assigned_images)
+            args = _layout_args(layout_id, heading, content, groups, assigned_images,
+                                table_data, formula, light, assigned_captions, entry.get("layout_structure"), code)
+            native = deck_pptx_exporter._layout_log_to_slide({"layout_function_name": layout_id, "args": args},
+                                          json_path.parent, len(slides) + 1)
         visible_payload = json.dumps(native, ensure_ascii=False)
         missing_visible = [text for text in content
                            if text not in visible_payload and json.dumps(text, ensure_ascii=False)[1:-1] not in visible_payload]
         if missing_visible:
             raise ValueError(f"Layout {layout_id!r} lost or rewrote content on slide {source_num}: "
                              f"{missing_visible[:2]!r}")
+        table = (native.get("parsed_table") or fm.parse_md_table((native.get("table") or {}).get("table_markdown", ""))
+                 if layout_id == "table_above_layout" else {})
+        if table.get("headers") and not fm.table_text_fits(native.get("groups") or [], native.get("bullets") or content,
+                                                           table["headers"], table["rows"], heading):
+            # the table and its text cannot both be readable on one page: the table alone, then the text alone
+            slides.append(_asset_page("data_table_layout", heading, table_data, "", light, json_path.parent,
+                                      len(slides) + 1, sections.get(root, ""), source_num, info.get("kg_node_id")))
+            layout_id = "nested_bullets_layout"
+            args = _layout_args(layout_id, heading, content, groups, [], None, "", light, None,
+                                entry.get("layout_structure"))
+            native = deck_pptx_exporter._layout_log_to_slide({"layout_function_name": layout_id, "args": args},
+                                                             json_path.parent, len(slides) + 1)
+            alone = fm.table_fit(table["headers"], table["rows"], fm.BW, fm.BODY_H - fm.TABLE_CAPTION_ROOM,
+                                 fm.TABLE_ALONE_MAX_FS, fm.TABLE_MIN_FS)
+            layout_notes.append({"slide": source_num, "asked": "table_above_layout",
+                                 "used": f"data_table_layout + {layout_id}",
+                                 "reason": "the table and its text cannot both be readable on one page"
+                                           + ("" if alone["fs"] >= fm.TABLE_FLOOR_FS and alone["fits"]
+                                              else f"; the table alone is drawn at {alone['fs']}pt")})
+        elif layout_id in ("formula_top_layout", "formula_below_layout") and content and not layout_select.fits(
+                layout_id, native.get("groups") or [{"title": "", "items": content}], content,
+                {"title": heading, "formula_lines": layout_select.formula_lines(native.get("formula_text"))})                 and not fm.formula_side_plan(native.get("groups") or [{"title": "", "items": content}], content, heading,
+                                             native.get("formula_text") or "")["ok"]:
+            # the formulas and their text cannot both be readable on one page, stacked or side by side (buildFormula):
+            # the formulas alone, then the text alone
+            slides.append(_asset_page(layout_id, heading, None, formula, light, json_path.parent, len(slides) + 1,
+                                      sections.get(root, ""), source_num, info.get("kg_node_id")))
+            layout_notes.append({"slide": source_num, "asked": layout_id, "used": f"{layout_id} + nested_bullets_layout",
+                                 "reason": "the formulas and their text cannot both be readable on one page"})
+            layout_id = "nested_bullets_layout"
+            args = _layout_args(layout_id, heading, content, groups, [], None, "", light, None,
+                                entry.get("layout_structure"))
+            native = deck_pptx_exporter._layout_log_to_slide({"layout_function_name": layout_id, "args": args},
+                                                             json_path.parent, len(slides) + 1)
         native.update({"title": heading, "layout_id": layout_id, "section": sections.get(root, ""),
                        "source_slide_number": source_num,
                        "source_heading_id": info.get("kg_node_id"),
@@ -405,9 +567,24 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
                        "bullet_provenance": provenance, "content_items": content,
                        "speaker_notes": entry.get("speaker_notes", []),
                        "image_provenance": image_provenance})
-        # Contract: one semantic slide produces exactly one native page and image layouts retain
-        # the same content. No adaptive pagination and no formula/table appendices are permitted.
+        # Contract: one semantic slide produces one native page, plus a page of its own for an asset that cannot share
+        # it (its table or formulas too big beside its figure or for the text: before the text page; each further
+        # table: after it); every page keeps the slide's content.
         slides.append(native)
+        for extra in further:
+            check = validate_table(extra.get("table_markdown") or "", extra.get("table_caption") or "")
+            if not check.get("valid"):
+                layout_notes.append({"slide": source_num, "asked": "data_table_layout", "used": "-",
+                                     "reason": f"invalid table removed: {check.get('validation_reason')}"})
+                continue
+            extra = {**extra, "table_markdown": check["normalized_content"],
+                     "structured_table": check["structured_table"], "validation_status": check["validation_status"]}
+            slides.append(_asset_page("data_table_layout", extra.get("table_caption") or heading, extra, "", light,
+                                      json_path.parent, len(slides) + 1, sections.get(root, ""), source_num,
+                                      info.get("kg_node_id")))
+        for _ in info.get("tables_not_drawn") or []:
+            layout_notes.append({"slide": source_num, "asked": "data_table_layout", "used": "speaker notes",
+                                 "reason": "a merged header cannot be aligned faithfully; its text is in the notes"})
         audit.append({"slide_number": source_num, "kind": "content", "density": len(content),
                       "coverage": [p["fact_id"] for p in provenance], "support": "source-owned",
                       "heading_id": info.get("kg_node_id"),
@@ -416,9 +593,13 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
                       "qa_verdict": data.get("metadata", {}).get("qa_status", "not_checked"),
                       "layout": layout_id, "layout_reason": entry.get("layout_reason", ""), "layout_eligible": True,
                       "image_provenance": image_provenance})
-    slides.append({"type": "end", "title": "Thank you", "is_light": light,
-                   "layout_id": "end_layout"})
-    # Contents represents only the authored section-divider hierarchy.
+    meta = data.get("metadata") or {}
+    labels = meta.get("labels") or {}
+    summary, source = recap[:Config.END_SUMMARY_MAX_ITEMS], source_title(meta, title)
+    kind, variant = end_design(lecture_id, [name for name, part in (("recap", summary), ("source", source)) if part])
+    slides.append({"type": kind, "variant": variant, "title": labels.get("thanks") or "Thank you", "is_light": light,
+                   "layout_id": "end_layout", "summary": summary, "source": source})
+    toc_entries = contents_entries(toc_entries, slide_entries)
     page_map_seed = {}
     for num, slide in enumerate(slides, 1):
         if "source_slide_number" in slide:
@@ -434,7 +615,7 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
             target = page_map_seed.get(source, [2])[0] + toc_count
             items.append({"n": f"{page_i * per_toc + local_i + 1:02d}",
                           "t": entry["title"], "p": target})
-        toc_pages.append({"type": "toc_sidebar", "title": "Contents", "toc_items": items, "layout_id": "toc_layout",
+        toc_pages.append({"type": "toc_sidebar", "title": labels.get("contents") or "Contents", "toc_items": items, "layout_id": "toc_layout",
                           "is_light": light, "toc_page": page_i + 1, "toc_total": toc_count})
     slides[1:1] = toc_pages
     page_map = {}
@@ -452,9 +633,9 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
     # Put the selected design first.  Slides initially remain attached to this
     # master while the other designs are available under "This Presentation".
     embedded_themes.sort(key=lambda item: item.get("name") != theme.get("name"))
-    return {"version": PIPELINE_VERSION, "evidence_schema_version": "chapters-v2",
-            "qa_report": data.get("qa_report", {}), "layout_notes": layout_notes,
-            "lecture_title": title, "speaker": speaker, "theme": theme,
+    return {"version": PIPELINE_VERSION, "qa_report": data.get("qa_report", {}), "layout_notes": layout_notes,
+            "lecture_title": title, "speaker": speaker, "institution": institution, "theme": theme, "labels": labels,
+            "date": str(meta.get("generated_at") or datetime.now().isoformat())[:10],
             "active_theme_name": theme.get("name", ""), "embedded_themes": embedded_themes,
             "layouts": all_layouts(), "slides": slides,
             "source_page_map": page_map, "contents": toc_entries, "audit": audit}

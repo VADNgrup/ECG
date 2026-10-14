@@ -219,10 +219,10 @@ THEME_LIBRARY: list[dict] = [
        {'display': 'Book Antiqua', 'body': 'Candara', 'mono': 'Courier New'}),
 
     _t('Forest Night', ['environment', 'sustainability', 'biology', 'ecology'],
-       'Deep forest-charcoal with a fresh mint-lime accent -- natural, focused, low-glare.', 'dark',
-       {'bg_dark': '0E1A12', 'bg_light': 'F2F8F3', 'accent': '4ADE80',
-        'c1': '14351F', 'c2': '256A3C', 'c3': '4E9E68', 'c4': '8FCBA1',
-        'text_dark': 'E6F2E9', 'text_light': '0E1A12', 'dim_dark': '93B29C', 'dim_light': '56705E'},
+       'Deep forest-green with an antique-gold accent -- natural, warm, low-glare.', 'dark',
+       {'bg_dark': '0F1F18', 'bg_light': 'F2F8F3', 'accent': 'D9B45A',
+        'c1': '163326', 'c2': '1F4A37', 'c3': '3E7A5C', 'c4': '8DBFA5',
+        'text_dark': 'EEF3EE', 'text_light': '0E1A12', 'dim_dark': 'A3B8AB', 'dim_light': '56705E'},
        {'display': 'Cambria', 'body': 'Corbel', 'mono': 'Consolas'}),
 
     _t('Wine Cellar', ['luxury', 'arts', 'history', 'culinary'],

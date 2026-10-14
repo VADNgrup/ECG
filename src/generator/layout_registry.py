@@ -77,6 +77,7 @@ LAYOUT_RULES: dict[str, LayoutRule] = {
     "highlight_list_layout": LayoutRule(),
     "icon_matrix_layout": LayoutRule(),
     "data_table_layout": LayoutRule(),
+    "figure_asset_layout": LayoutRule(image_count=(1, 1)),
     "pricing_cards_layout": LayoutRule(),
     "cover_split_layout": LayoutRule(content=False, special_only=True),
     "toc_layout": LayoutRule(content=False, special_only=True),
@@ -84,8 +85,6 @@ LAYOUT_RULES: dict[str, LayoutRule] = {
     "toc_described_layout": LayoutRule(content=False, special_only=True),
     "toc_cards_layout": LayoutRule(content=False, special_only=True),
     "end_layout": LayoutRule(content=False, special_only=True),
-    "end_with_image_layout": LayoutRule(content=False, image_count=(1, 1), special_only=True),
-    "end_image_hero_layout": LayoutRule(content=False, image_count=(1, 1), special_only=True),
 }
 
 CONTENT_LAYOUTS = frozenset(name for name, rule in LAYOUT_RULES.items()

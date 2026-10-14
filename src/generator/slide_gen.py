@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from src.evaluation.render import SLIDE_IMAGES, render
 from src.generator.pptx_pipeline import export_native
 from src.utils.config import Config
 
@@ -24,7 +25,19 @@ def run_pipeline(lecture_json_path, lecture_title=None, speaker_information='', 
     output = Path(Config.OUTPUT_DIR) / name / model / f'{name}.pptx'
     count = export_native(source, output, title=lecture_title, speaker=speaker_information, institution=institution)
     print(f'[slide_gen] PPTX complete: {count} slides -> {output}')
+    snapshot(output)
     return output
+
+
+def snapshot(deck: Path) -> None:
+    """The deck's slides as pictures in `slide_images/` beside it (the evaluation reads them); a failure only warns."""
+    pictures = deck.parent / SLIDE_IMAGES
+    for old in pictures.glob('*.png') if pictures.exists() else []:
+        old.unlink()
+    try:
+        print(f'[slide_gen] slide pictures: {len(render(deck, pictures))} -> {pictures}')
+    except Exception as exc:
+        print(f'[slide_gen] slide pictures not made ({type(exc).__name__}: {str(exc)[:120]}); the evaluation makes them')
 
 
 if __name__ == '__main__':
