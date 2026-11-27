@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/e/anaconda3/envs/slide/python.exe -m py_compile *)",
+      "Bash($SLIDE -m py_compile *)",
+      "Bash(node --check *)",
+      "Bash(/e/anaconda3/envs/slide/python.exe -c *)",
+      "Bash(PYTHONUTF8=1 /e/anaconda3/envs/slide/python.exe -c *)",
+      "Bash(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 /e/anaconda3/envs/slide/python.exe -c *)",
+      "Bash(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 /e/anaconda3/envs/slide/python.exe -m py_compile *)",
+      "Bash(/e/anaconda3/envs/slide/python.exe -m src.rag.*)",
+      "Bash(PYTHONUTF8=1 /e/anaconda3/envs/slide/python.exe -m src.rag.*)",
+      "Bash($SLIDE -c *)",
+      "Bash(PYTHONUTF8=1 $SLIDE -c *)"
+    ]
+  }
+}

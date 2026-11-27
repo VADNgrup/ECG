@@ -19,6 +19,8 @@ import math
 import re
 from typing import Dict, Iterable, List, Optional, Set
 
+import numpy as np
+
 from src.rag.asset_validation import holds_data
 from src.rag.code_text import cut_off, drawable_code, drawable_formula, joined_formula
 from src.rag.embedder import embed_transient
@@ -254,6 +256,35 @@ class PacketAssembler:
         images = self._merge_table_pictures(images, table)
         return {"formula": formula, "table": table, "code": code, "image": images[0] if images else None,
                 "images": images, "not_drawn": not_drawn, "merged_pictures": sorted(self._merged)}
+
+    def place_tables(self, slides: List[dict]) -> None:
+        """Each table goes to the first slide whose passages cite it by the document's label ("Table 3"); a table no
+        slide cites goes to the slide of its own section whose passages are closest to it in meaning (its caption and
+        cells); without a label cited or an embedder it stays on the slide whose text it follows."""
+        ch = self.chapter
+        placed = [(s, row) for s in slides for row in (s.get("built") or {}).get("assets", {}).get("table") or []]
+        if len(slides) < 2 or not placed:
+            return
+        text = {id(s): " ".join(t for row in s["built"]["pool"].values() for _, t in row["sentences"]) for s in slides}
+        cites = {id(s): set(reference_keys(self._references, text[id(s)], self._labels)) for s in slides}
+        heads = {id(s): {ch.by_pid[p]["heading"] for p in s.get("paragraphs") or [] if p in ch.by_pid} for s in slides}
+        for source, row in placed:
+            label = next(iter(reference_keys(self._references, row.get("caption") or "", self._labels)), None)
+            target = next((s for s in slides if label and label in cites[id(s)] and s["built"]["pool"]), None)
+            if target is None and self.embedder is not None and row.get("pid") in ch.by_pid:
+                own = [s for s in slides if ch.by_pid[row["pid"]]["heading"] in heads[id(s)] and s["built"]["pool"]]
+                if len(own) > 1:
+                    table = f"{row.get('caption') or ''}\n{row.get('text') or ''}"[:Config.TABLE_MATCH_CHARS]
+                    sims = embed_transient(self.embedder, [table] + [text[id(s)][:Config.TABLE_MATCH_CHARS] for s in own])
+                    target = own[int(np.argmax(sims[1:] @ sims[0]))]
+            if target is None or target is source:
+                continue
+            source["built"]["assets"]["table"] = [r for r in source["built"]["assets"]["table"] if r is not row]
+            target["built"]["assets"]["table"] = [*target["built"]["assets"]["table"], row]
+            source["built"]["refs"].pop(row["sid"], None)
+            target["built"]["refs"][row["sid"]] = ch.sentences[row["sid"]]["ref"]
+            for s in (source, target):
+                s["built"]["visual_plan"] = self.visual_plan(s["built"]["assets"])
 
     def place_left_figures(self, slides: List[dict], used: Set[str]) -> None:
         """A figure no slide took (captioned, or uncaptioned and called content) goes to a slide with room for it, of its

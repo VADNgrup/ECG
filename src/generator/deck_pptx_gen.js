@@ -200,7 +200,7 @@ function buildThemeXml(xml, theme) {
   const c1 = theme.c1 || T.c1, c2 = theme.c2 || T.c2, c3 = theme.c3 || T.c3, c4 = theme.c4 || T.c4;
   const display = theme.font_display || FDISP, body = theme.font_body || FBODY;
   const clr = (n, v) => `<a:${n}><a:srgbClr val="${String(v).replace('#', '').toUpperCase()}"/></a:${n}>`;
-  const name = 'LecSlide - ' + (theme.name || 'Custom');
+  const name = 'LOFOSG - ' + (theme.name || 'Custom');
   const scheme = `<a:clrScheme name="${name}">` + clr('dk1', isLight ? fgLight : fgDark) + clr('lt1', isLight ? bgLight : bgDark) +
     clr('dk2', isLight ? fgDark : fgLight) + clr('lt2', isLight ? bgDark : bgLight) + clr('accent1', accent) +
     clr('accent2', c1) + clr('accent3', c2) + clr('accent4', c3) + clr('accent5', c4) +
@@ -278,6 +278,8 @@ function onePPr(xml) {
 
 function numberFrom(name, re) { const m = name.match(re); return m ? Number(m[1]) : 0; }
 
+// Every curated design (manifest.embedded_themes, the deck's own first) as a slide master of its own with a copy of the
+// layouts, so Design > This Presentation offers each; slides stay on the first. Only roles are recoloured: no resize.
 async function embedDesigns(zip, baseThemeXml) {
   const themes = Array.isArray(manifest.embedded_themes) && manifest.embedded_themes.length
     ? manifest.embedded_themes : [T];
@@ -304,29 +306,23 @@ async function embedDesigns(zip, baseThemeXml) {
     const partNo = themeIndex + 1;
     const theme = themes[themeIndex];
     const firstLayout = themeIndex * baseCount + 1;
-    const masterPath = `ppt/slideMasters/slideMaster${partNo}.xml`;
-    const masterRelsPath = `ppt/slideMasters/_rels/slideMaster${partNo}.xml.rels`;
-    const themePath = `ppt/theme/theme${partNo}.xml`;
-    let masterRels = baseMasterRels.replace(/\.\.\/slideLayouts\/slideLayout(\d+)\.xml/g,
+    const masterRels = baseMasterRels.replace(/\.\.\/slideLayouts\/slideLayout(\d+)\.xml/g,
       (_m, n) => `../slideLayouts/slideLayout${firstLayout + Number(n) - 1}.xml`)
       .replace('../theme/theme1.xml', `../theme/theme${partNo}.xml`);
-    // Master ids and layout ids share one global id space.  Each design owns
-    // one master id followed by its layout ids (matching files saved by
-    // PowerPoint itself), so reserve baseCount+1 ids per design.
+    // Master ids and layout ids share one id space: each design owns one master id followed by its layout ids (as files
+    // PowerPoint saves do), so baseCount+1 ids are reserved per design.
     const idOffset = themeIndex * (baseCount + 1);
     const masterXml = baseMaster
       .replace('<p:sldMaster ', '<p:sldMaster preserve="1" ')
-      .replace(/<p:cSld(?:\s+name="[^"]*")?/, `<p:cSld name="LecSlide - ${theme.name}"`)
-      .replace(/(<p:sldLayoutId id=")(\d+)(")/g,
-        (_m, lead, id, tail) => lead + String(Number(id) + idOffset) + tail);
-    zip.file(masterPath, masterXml);
-    zip.file(masterRelsPath, masterRels);
-    zip.file(themePath, buildThemeXml(baseThemeXml, theme));
+      .replace(/<p:cSld(?:\s+name="[^"]*")?/, `<p:cSld name="LOFOSG - ${theme.name}"`)
+      .replace(/(<p:sldLayoutId id=")(\d+)(")/g, (_m, lead, id, tail) => lead + String(Number(id) + idOffset) + tail);
+    zip.file(`ppt/slideMasters/slideMaster${partNo}.xml`, masterXml);
+    zip.file(`ppt/slideMasters/_rels/slideMaster${partNo}.xml.rels`, masterRels);
+    zip.file(`ppt/theme/theme${partNo}.xml`, buildThemeXml(baseThemeXml, theme));
     for (let j = 0; j < baseLayouts.length; j++) {
-      const newNo = firstLayout + j;
       const row = baseLayouts[j];
-      zip.file(`ppt/slideLayouts/slideLayout${newNo}.xml`, row.xml);
-      zip.file(`ppt/slideLayouts/_rels/slideLayout${newNo}.xml.rels`,
+      zip.file(`ppt/slideLayouts/slideLayout${firstLayout + j}.xml`, row.xml);
+      zip.file(`ppt/slideLayouts/_rels/slideLayout${firstLayout + j}.xml.rels`,
         row.rels.replace('../slideMasters/slideMaster1.xml', `../slideMasters/slideMaster${partNo}.xml`));
     }
     const rid = `rId${nextRid++}`;
@@ -337,11 +333,9 @@ async function embedDesigns(zip, baseThemeXml) {
   }
   zip.file('ppt/presentation.xml', presentation);
   zip.file('ppt/_rels/presentation.xml.rels', presentationRels);
-  // PptxGenJS writes speculative slide-master overrides (one per slide), even
-  // though only slideMaster1.xml exists.  Once cloned masters are added those
-  // stale entries become duplicate PartName overrides, which PowerPoint treats
-  // as a corrupt package.  Rebuild the three design-related override groups
-  // from the parts that actually exist in the zip.
+  // PptxGenJS writes speculative slide-master overrides (one per slide) though only slideMaster1.xml exists; with cloned
+  // masters those become duplicate PartName overrides, a corrupt package for PowerPoint. The design overrides are
+  // rebuilt from the parts the zip holds.
   contentTypes = contentTypes.replace(
     /<Override\s+PartName="\/ppt\/(?:slideMasters\/slideMaster\d+|slideLayouts\/slideLayout\d+|theme\/theme\d+)\.xml"\s+ContentType="[^"]+"\s*\/>/g,
     '');
@@ -2026,7 +2020,7 @@ function tableData(headers, rows, isLight, fit) {
 }
 
 const TABLE_ALONE_MAX_FS = 18;          // largest size of a table on its own page (buildTable)
-const TABLE_CAPTION_ROOM = 0.35;        // body height a table alone leaves for its caption
+const TABLE_CAPTION_ROOM = 0.35;        // body height a table leaves for its caption (alone or with text)
 function buildTable(s) {
   const isLight = !!s.is_light;
   const slide   = pptx.addSlide();
@@ -2103,16 +2097,28 @@ function buildTblAbove(s) {
   addTitle(slide, s.title, isLight, MX, F.ty, BW, F.th);
   const borderC = dimC(isLight);
   if (!hasBulls) {
-    const fit = tableFit(headers, rows, BW, F.bh - 0.05, TABLE_ALONE_MAX_FS, TABLE_MIN_FS);
+    const fit = tableFit(headers, rows, BW, F.bh - 0.05 - TABLE_CAPTION_ROOM, TABLE_ALONE_MAX_FS, TABLE_MIN_FS);
     slide.addTable(tableData(headers, rows, isLight, fit), {
       x: MX, y: F.by, w: BW, rowH: fit.rowH, colW: fit.colW, border: { pt: 0.5, color: borderC } });
+    addTableCaption(slide, s, MX, F.by + fit.height, BW, isLight);
     return;
   }
   const best = tableTextPlan(s, bullets, headers, rows, F);
   slide.addTable(tableData(headers, rows, isLight, best.fit), {
     x: MX, y: F.by, w: best.tw, rowH: best.fit.rowH, colW: best.fit.colW, border: { pt: 0.5, color: borderC } });
+  addTableCaption(slide, s, MX, F.by + best.fit.height, best.tw, isLight);
   if (best.side) drawList(slide, s, MX + best.tw + TABLE_SIDE_GAP, F.by, F.bh, isLight, best.p);
-  else drawList(slide, s, MX, F.by + best.fit.height + TABLE_TEXT_GAP, best.room, isLight, best.p);
+  else drawList(slide, s, MX, F.by + best.fit.height + TABLE_CAPTION_ROOM + TABLE_TEXT_GAP, best.room, isLight, best.p);
+}
+
+// A table's caption in the strip under it (TABLE_CAPTION_ROOM tall): the document's own, else its kind and number.
+function addTableCaption(slide, s, x, y, w, isLight) {
+  const cap = (s.parsed_table && s.parsed_table.caption) || (s.table && s.table.table_caption);
+  if (!cap) return;
+  slide.addText(toPlain(cap), {
+    x, y: y + FIG_CAPTION_GAP, w, h: TABLE_CAPTION_ROOM - FIG_CAPTION_GAP,
+    fontSize: FIG_CAPTION_FS, italic: true, color: dimC(isLight), fontFace: FBODY, align: 'center', valign: 'top',
+  });
 }
 
 // The size a list plan's text is really shown at: its own, or what the fit guard leaves of it when it overflows h.
@@ -2142,7 +2148,7 @@ function tableTextPlan(s, bullets, headers, rows, F) {
   };
   for (let tfs = TABLE_ABOVE_MAX_FS; tfs >= TABLE_MIN_FS; tfs--) {   // table above, text below
     const fit = tableFit(headers, rows, BW, 0, tfs, tfs);
-    const room = F.bh - fit.height - TABLE_TEXT_GAP;
+    const room = F.bh - fit.height - TABLE_CAPTION_ROOM - TABLE_TEXT_GAP;
     if (room < TABLE_TEXT_MIN_H || (!fit.whole && tfs > TABLE_MIN_FS)) continue;
     const p = planList(s, bullets, BW, room, TABLE_TEXT_MAX_FS);
     consider({ fit, p, room, tw: BW, side: false, textFs: shownFs(p, room) });
@@ -2152,14 +2158,14 @@ function tableTextPlan(s, bullets, headers, rows, F) {
     const p = planList(s, bullets, BW - tw - TABLE_SIDE_GAP, F.bh, TABLE_TEXT_MAX_FS, 1);
     for (let tfs = TABLE_SIDE_MAX_FS; tfs >= TABLE_MIN_FS; tfs--) {
       const fit = tableFit(headers, rows, tw, 0, tfs, tfs);
-      if (fit.height > F.bh || !fit.whole) continue;
+      if (fit.height > F.bh - TABLE_CAPTION_ROOM || !fit.whole) continue;
       consider({ fit, p, room: F.bh, tw, side: true, textFs: shownFs(p, F.bh) });
       break;
     }
   }
   if (!best) {                                                 // nothing leaves the text room: the smallest table
     const fit = tableFit(headers, rows, BW, 0, TABLE_MIN_FS, TABLE_MIN_FS);
-    const room = Math.max(TABLE_TEXT_MIN_H, F.bh - fit.height - TABLE_TEXT_GAP);
+    const room = Math.max(TABLE_TEXT_MIN_H, F.bh - fit.height - TABLE_CAPTION_ROOM - TABLE_TEXT_GAP);
     best = { fit, p: planList(s, bullets, BW, room, TABLE_TEXT_MAX_FS), room, tw: BW, side: false };
   }
   return best;
@@ -3169,6 +3175,25 @@ function buildImageQuoteHero(s) {
 const TOC_ROWS = 7, TOC_ROWS_MULTI = 10, TOC_COLS = 3, TOC_COL_GAP = 0.3;
 const TOC_HEAD_MAX_FS = 44, TOC_HEAD_MIN_FS = 16;   // the sidebar's heading ("Contents"): its largest and smallest size
 const TOC_HEAD_Y = 1.2, TOC_HEAD_MAX_H = 3.4;       // its top, and the most height it may take
+const TOC_LEVEL_INDENT = 0.25;                      // a group heading's indent per level below the first
+// a group heading's band: the accent laid thinly over the page, a solid accent bar at its left, its text a little
+// larger than the entries under it
+const TOC_GROUP = { inset: 0.1, radius: 0.06, tint: 88, bar: 0.07, pad: 0.16, fsUp: 2, levelStep: 1,
+                    minFs: 9 };                     // the smallest size a heading may take
+
+// Where each contents entry sits, [column, row]: down a column, then on to the next; a group heading (an entry with
+// entries under it) never ends a column, it moves on with them. null when `rows` rows in `cols` columns cannot hold it.
+function tocSlots(items, cols, rows) {
+  const slots = [];
+  let c = 0, r = 0;
+  items.forEach((it, i) => {
+    if (r >= rows || (it.group && r === rows - 1 && i < items.length - 1)) { c += 1; r = 0; }
+    slots.push([c, r]);
+    r += 1;
+  });
+  return c < cols ? slots : null;
+}
+
 function buildTocSidebar(s) {
   const isLight = !!s.is_light;
   const slide = pptx.addSlide();
@@ -3190,10 +3215,11 @@ function buildTocSidebar(s) {
   slide.addShape(pptx.ShapeType.rect, { x: 0.5 + DIV_TEXT_INSET, y: TOC_HEAD_Y + hh + DIV_BAR_GAP, w: 0.7, h: 0.05,
     fill: { color: ink, transparency: 20 }, line: { type: 'none' } });
   const lx = panelW + (cols > 1 ? 0.4 : 0.55), lw = W - lx - MX;
-  const rows = Math.max(1, Math.ceil(items.length / cols));
+  let rows = Math.max(1, Math.ceil(items.length / cols)), slots;
+  while (!(slots = tocSlots(items, cols, rows))) rows += 1;   // room for the group headings that move to a new column
   const cw = (lw - TOC_COL_GAP * (cols - 1)) / cols;
   const rowH = (H - 1.0) / rows;
-  const labels = items.map((it, i) => it.n || String(i + 1).padStart(2, '0'));
+  const labels = items.map((it, i) => it.group ? '' : (it.n || String(i + 1).padStart(2, '0')));
   const NUM_FS = cols > 1 ? 18 : 24;                                   // the number's largest size
   // the number column holds the widest number at its largest size, plus the box's 0.1" insets on each side
   const NUM_W = Math.max(cols > 1 ? 0.45 : 0.66, Math.max(...labels.map(l => textW(l, NUM_FS, 'display', true))) / WRAP_SAFE + 0.2);
@@ -3201,13 +3227,39 @@ function buildTocSidebar(s) {
   const titleW = cw - NUM_W - PAGE_W - (PAGE_W ? 0.1 : 0.05);
   const uFs = minFitArr(items.map(it => fitClip(toPlain(it.t || ''), titleW, rowH - 0.14, cols > 1 ? 15 : 19, 10).fs), 15);
   const top = 0.5 + ((H - 1.0) - rows * rowH) / 2;
+  // a group heading's text, from its column's left: its level's indent, then the bar and the padding, to the column's end
+  const groupX = it => (it.level || 0) * TOC_LEVEL_INDENT + TOC_GROUP.bar + TOC_GROUP.pad;
+  const groupW = it => cw - TOC_GROUP.pad - groupX(it);
+  const bandH = rowH - 2 * TOC_GROUP.inset;
+  // one size per heading level, so the headings of a level look alike: the largest at which every heading of the
+  // level fits its band (wrapping if it must), from the entries' size plus TOC_GROUP.fsUp, TOC_GROUP.levelStep less
+  // per level down
+  const groupFs = {};
+  items.filter(it => it.group).forEach(it => {
+    const lv = it.level || 0, text = toPlain(it.t || '');
+    let fs = uFs + TOC_GROUP.fsUp - lv * TOC_GROUP.levelStep;   // the heading's lines, measured in its own bold face
+    while (fs > TOC_GROUP.minFs && estLines(text, groupW(it), fs, 'body', true) * fs * LINE / 72 > bandH) fs -= 1;
+    groupFs[lv] = Math.min(groupFs[lv] ?? Infinity, fs);
+  });
   items.forEach((it, i) => {
-    const c = Math.floor(i / rows), r = i % rows;
+    const [c, r] = slots[i];
     const x = lx + c * (cw + TOC_COL_GAP), y = top + r * rowH;
-    slide.addText(labels[i], { x, y, w: NUM_W, h: rowH, wrap: false, fontSize: Math.min(NUM_FS, uFs + 6), fontFace: FDISP, color: ACC, bold: true, valign: 'middle' });
-    slide.addText(toPlain(it.t || ''), { x: x + NUM_W, y, w: titleW, h: rowH, fontSize: uFs, fontFace: FBODY, color: fgC(isLight), bold: true, valign: 'middle', wrap: true });
-    if (it.p && PAGE_W) slide.addText(String(it.p), { x: x + cw - PAGE_W, y, w: PAGE_W, h: rowH, fontSize: cols > 1 ? 10 : 11, fontFace: FMONO, color: dimC(isLight), align: 'right', valign: 'middle', wrap: false });
-    if (r < rows - 1 && i < items.length - 1) slide.addShape(pptx.ShapeType.rect, { x: x + NUM_W, y: y + rowH - 0.01, w: cw - NUM_W, h: 0.012, fill: { color: fgC(isLight), transparency: 85 }, line: { type: 'none' } });
+    if (it.group) {          // a group heading: no number; the first level on a tinted band, every level with the bar
+      const lv = it.level || 0, gx = x + lv * TOC_LEVEL_INDENT;
+      const by = y + TOC_GROUP.inset, bh = bandH;
+      if (lv === 0) slide.addShape(pptx.ShapeType.roundRect, { x: gx, y: by, w: x + cw - gx, h: bh, rectRadius: TOC_GROUP.radius,
+        fill: { color: ACC, transparency: TOC_GROUP.tint }, line: { type: 'none' } });
+      slide.addShape(pptx.ShapeType.rect, { x: gx, y: by, w: TOC_GROUP.bar, h: bh, fill: { color: ACC }, line: { type: 'none' } });
+      // its page is the one before its first entry's, so it shows none
+      slide.addText(toPlain(it.t || ''), { x: x + groupX(it), y: by, w: groupW(it), h: bh, fontSize: groupFs[lv],
+        fontFace: FBODY, color: ACC, bold: true, valign: 'middle', wrap: true });
+    } else {
+      slide.addText(labels[i], { x, y, w: NUM_W, h: rowH, wrap: false, fontSize: Math.min(NUM_FS, uFs + 6), fontFace: FDISP, color: ACC, bold: true, valign: 'middle' });
+      slide.addText(toPlain(it.t || ''), { x: x + NUM_W, y, w: titleW, h: rowH, fontSize: uFs, fontFace: FBODY, color: fgC(isLight), bold: true, valign: 'middle', wrap: true });
+    }
+    if (it.p && PAGE_W && !it.group) slide.addText(String(it.p), { x: x + cw - PAGE_W, y, w: PAGE_W, h: rowH, fontSize: cols > 1 ? 10 : 11, fontFace: FMONO, color: dimC(isLight), align: 'right', valign: 'middle', wrap: false });
+    const next = slots[i + 1];
+    if (!it.group && next && next[0] === c) slide.addShape(pptx.ShapeType.rect, { x: x + NUM_W, y: y + rowH - 0.01, w: cw - NUM_W, h: 0.012, fill: { color: fgC(isLight), transparency: 85 }, line: { type: 'none' } });
   });
 }
 

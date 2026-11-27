@@ -135,11 +135,13 @@ class Chapter:
         return out
 
 
-def load_chapters(kb_dir, index: dict, roots: List[int], visible) -> List[Chapter]:
+def load_chapters(kb_dir, index: dict, roots: List[int], visible, own_only=()) -> List[Chapter]:
+    """One Chapter per root: the root and every visible heading under it; a root in `own_only` holds only its own text
+    (a heading split into its subheadings keeps its own paragraphs as a unit of their own)."""
     orchestrator = ScopeOrchestrator(index, kb_dir)
     out = []
     for root in roots:
-        ordered = orchestrator.ordered_scope([root], visible)
+        ordered = [root] if root in set(own_only) else orchestrator.ordered_scope([root], visible)
         by_heading = scope_sentences(kb_dir, index, set(ordered))
         out.append(Chapter(root, orchestrator.title(root), ordered, by_heading,
                            {h: orchestrator.title(h) for h in ordered}))

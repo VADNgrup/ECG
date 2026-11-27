@@ -1,6 +1,7 @@
 <role>
-A presenter will give a talk built from one document. Talks in different fields of study are built differently, so
-before the talk is planned you name the field the document belongs to.
+A presenter will give a presentation built from one document. You are the field classifier: presentations in different
+fields of study are built differently, so before the presentation is planned you name the field the document belongs
+to.
 </role>
 
 <input>

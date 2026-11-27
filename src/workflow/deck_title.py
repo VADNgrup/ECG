@@ -8,6 +8,7 @@ from typing import List
 
 import pymupdf
 
+from src.utils.config import Config
 from src.utils.content_cache import cached_json, digest
 from src.utils.llm import chat, parse_json_reply
 
@@ -17,24 +18,39 @@ _PROMPT = (
     'language. Return JSON {"title": "..."}.')
 _NUMBERED = re.compile(r"^\s*(chapter|chương|part|phần|section|mục)\s+(\d+)", re.IGNORECASE)
 _TRIMMED = re.compile(r"_p\d+-\d+$")
+_WORD = re.compile(r"\w+")
 
 
 def book_title(source_file: str) -> str:
     """The PDF's own title (its metadata; a page-trimmed copy falls back to the original book in the same raw folder)."""
     path = Path(source_file or "")
     candidates = [path]
-    if _TRIMMED.search(path.stem):
+    if _TRIMMED.search(path.stem):           # a page range cut by this pipeline: its opening pages are not the book's
         original = _TRIMMED.sub("", path.stem) + path.suffix
-        candidates += [path.parent / original, path.parent.parent / original]
+        books = [b for b in (path.parent / original, path.parent.parent / original) if b.is_file()]
+        candidates = books[:1] or [path]      # the original book when it is at hand, else the copy's metadata as cut
     for candidate in candidates:
         try:
             if candidate.suffix.lower() == ".pdf" and candidate.is_file():
-                title = " ".join(str((pymupdf.open(candidate).metadata or {}).get("title") or "").split())
+                pdf = pymupdf.open(candidate)
+                title = " ".join(str((pdf.metadata or {}).get("title") or "").split())
+                if title and (candidate != path or not _TRIMMED.search(path.stem)) and not _printed(title, pdf):
+                    continue
                 if title:
                     return title
         except Exception:
             continue
     return ""
+
+
+def _printed(title: str, pdf) -> bool:
+    """A metadata title the document's opening pages print (most of its words): a file made from another one's template
+    keeps that one's title (14-Math-1.pdf: a linear-programming paper titled 'Policy and Plans to establish British
+    authority in the Shan States')."""
+    words = set(_WORD.findall(title.casefold()))
+    pages = range(min(Config.BOOK_TITLE_PAGES, pdf.page_count))
+    text = set(_WORD.findall(" ".join(pdf[n].get_text() for n in pages).casefold()))
+    return bool(words) and len(words & text) >= Config.BOOK_TITLE_MIN_SHARED * len(words)
 
 
 def fallback(titles: List[str]) -> str:

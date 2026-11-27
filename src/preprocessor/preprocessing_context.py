@@ -95,7 +95,7 @@ async def preprocess_context(context, output=None, root_heading=None, domain=Non
     initial_state = {'document_context': context, 'deck': [], 'review': None, 'lecture_title': '', 'slides': [], 'planned_specs': None,
                      'slide_specs': None, 'slide_packets': None, 'qa_report': None,
                      'root_heading': root_heading, 'domain': domain, 'scope_manifest': None, 'unit_plans': None,
-                     'labels': None}
+                     'labels': None, 'numbered': None}
     # each Writer repair the QA Router asks for is two more steps (slide_writer, content_qa)
     result = await workflow.ainvoke(initial_state, config={"recursion_limit": Config.GRAPH_RECURSION_LIMIT})
     final_slides = result['slides']
@@ -105,6 +105,7 @@ async def preprocess_context(context, output=None, root_heading=None, domain=Non
     lecture_output = {'lecture_id': effective_id, 'metadata': {'source_document_id': context.document_id, 'source_file': context.source_file, 'generated_at': datetime.now().isoformat(), 'total_slides': len(final_slides), 'quality_score': quality_score, 'iterations': 1, 'qa_status': qa_report.get('status', 'unknown'), 'qa_warning_count': warning_count}, 'lecture_title': result['lecture_title'], 'slides': [asdict(s) for s in final_slides]}
     lecture_output['metadata']['document_language'] = document_language or 'en'
     lecture_output['metadata']['labels'] = result.get('labels') or {}
+    lecture_output['metadata']['numbered'] = result.get('numbered') or {}
     lecture_output['metadata']['pipeline_version'] = PIPELINE_VERSION
     lecture_output['metadata']['lecture_contract_version'] = LECTURE_CONTRACT_VERSION
     lecture_output['qa_report'] = qa_report

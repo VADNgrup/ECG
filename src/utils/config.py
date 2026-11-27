@@ -62,6 +62,8 @@ class Config:
         "social": ("contrast", "sequence", "hub", "lead_support", "summary"),
     }
     # ── the document read ──────────────────────────────────────────────────────
+    BOOK_TITLE_PAGES = 3                 # a PDF's metadata title is the deck's only when its opening pages print it:
+    BOOK_TITLE_MIN_SHARED = 0.8          # this share of the title's words, at least
     MIN_SOURCE_CHARS = 512               # a reading shorter than this is an empty or broken extraction: no deck
     LANGUAGE_SAMPLE_CHARS = 4000         # opening of the document its language is detected from
     # ── Outline agent ──────────────────────────────────────────────────────────
@@ -70,15 +72,21 @@ class Config:
     OUTLINE_BLOCK_MIN_CHARS = 1000       # sections join into blocks of at least this: 2000 put 2.95 sections in a block of the 48-document collection, 1000 puts 1.96 (HOML 1.63 -> 1.29)
     OUTLINE_GIST_SENTENCES = 2           # sentences retrieval gives per block to say what it states, at least...
     OUTLINE_GIST_MAX = 10                # ...one per slide the block may get, at most this many
-    OUTLINE_GIST_CHARS = 220             # each shown up to this many characters
+    OUTLINE_IDEA_CHARS = 160             # the KG description shown with each idea of a heading stating no edge, up to this
+    OUTLINE_GIST_CHARS = 220            # each shown up to this many characters
+    OUTLINE_QUERY_TOP_K = 10             # entities MiniRAG's mini query matches per keyword (its QueryParam.top_k)
+    OUTLINE_QUERY_NODE_TOKENS = 4000     # its entity table's token cap (MiniRAG: 500); the table reaches no LLM, and a
+                                         # KG of several documents needs room left after other documents' entities
     OUTLINE_ASSET_CHARS = 90             # a table's or figure's caption line in a block's dossier
     OUTLINE_RELATION_CHARS = 90          # the sentence stating a relation, up to this many characters
     LEAVE_INCIDENTAL_SPAN = 2            # a node named in at most this many paragraphs may be left as named in passing
     PLANNER_MAX_CONCURRENCY = 4          # chapters planned in parallel
-    OUTLINE_MAX_TOKENS = 12000           # answer room of one Outline call: a chapter's goal tree and slides (estimated ~7k for 40 headings)
+    OUTLINE_GOALS_MAX_TOKENS = 2000      # answer room of the Outline's second call: goals of the headings it left without one
+    OUTLINE_MAX_TOKENS = 12000          # answer room of one Outline call: a chapter's goal tree and slides (estimated ~7k for 40 headings)
     # ── Packet Builder ─────────────────────────────────────────────────────────
     PACKET_PASSAGES = 3                  # whole paragraphs an anchor packet carries
     PACKET_IMAGE_MIN_COS = 0.4           # an uncited figure must be this close to the slide
+    TABLE_MATCH_CHARS = 4000             # text of a table, and of a slide's passages, embedded to place an uncited table
     NO_SPACE_CHAR_SIZE = 5               # text one character of a no-space script holds, as characters of a spaced one: one text measures 3000 (German) and 599 (Chinese)
     PACKET_HINT_CHARS = 140              # the anchored sentence shown for a node its passages do not name
     MAX_SLIDE_IMAGES = 2                 # figures one slide shows (two side by side)
@@ -111,7 +119,10 @@ class Config:
     DECK_LABEL_SAMPLE_PIECES = 8         # ...taken from this many paragraphs across it, so one foreign abstract does not decide
     DECK_LABEL_MAX_CHARS = 20            # a fixed label longer than this is not a label: the renderer's default stays
     DECK_LABEL_MAX_TOKENS = 160          # the answer: nine short labels
-    END_SUMMARY_MAX_ITEMS = 6            # the closing slide's recap: at most this many of the chapters' goals
+    END_SUMMARY_MAX_ITEMS = 6            # the closing slide's recap: at most this many lines (a chapter's goals, or the
+                                         # deck's structure at the deepest level that fits)
+    TOC_GLANCE_COLS = 2                  # Contents adds a deeper heading level only while the page stays within this many
+                                         # of the renderer's columns (fit_model.TOC_ROWS_MULTI rows each)
     QA_THIN_BULLETS = 3                  # a slide with fewer bullets gets unused facts or is dropped
     QA_MAX_ROUNDS = 2                    # rounds the QA Router may send slides back to the Writer (the paper's k_max);
                                          # a bullet still wrong after them is removed

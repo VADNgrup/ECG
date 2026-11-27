@@ -41,6 +41,7 @@ def create_workflow(domain: Optional[str] = None) -> StateGraph:
         """The deck as the lecture file stores it, read from S: each chapter's opener (its agenda) and the written
         slides."""
         ledger = pipeline.ledger(written(deck))
+        labels = pipeline.labels()
         for row in ledger.values():
             print(f"[coverage] {row['chapter']}: paragraphs on slides {row['paragraph_slide_rate']:.0%}, "
                   f"KG nodes {row['node_slide_rate']:.0%}, links {row['link_slide_rate']:.0%}")
@@ -48,13 +49,14 @@ def create_workflow(domain: Optional[str] = None) -> StateGraph:
         for e in deck:
             spec, packet = e["spec"], e["packet"]
             if spec.is_section_opener:
+                notes = [{"passage": packet["notes"]}] if packet.get("notes") else []
                 slides.append(SlideContent(slide=spec, content=list(packet.get("agenda_items") or []) or [spec.slide_title],
-                                           layout_hint='section_divider_layout'))
+                                           layout_hint='section_divider_layout', speaker_notes=notes))
             else:
                 slides.append(e["content"])
                 packet['slide_title'] = spec.slide_title       # the Writer may retitle the slide
         return {'slides': slides, 'slide_specs': [e["spec"] for e in deck], 'slide_packets': [e["packet"] for e in deck],
-                'scope_manifest': pipeline.manifest(ledger), 'unit_plans': pipeline.report(), 'labels': pipeline.labels()}
+                'scope_manifest': pipeline.manifest(ledger), 'unit_plans': pipeline.report(), 'labels': labels, 'numbered': pipeline.numbered(labels)}
 
     def outline_node(state: WorkflowState) -> Dict[str, Any]:
         banner("Outline — goals and slides of each chapter from its KG and text")

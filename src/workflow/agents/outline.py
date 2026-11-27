@@ -1,7 +1,9 @@
 """Agent 1, Outline: plans each chapter's slides and goals from what the KG and retrieval say about its sections.
 
-Code queries first (`SectionQuery`, 0 LLM): the chapter's sections, joined into blocks, each with its sections, each with
-its central KG ideas, their relations and the sentences retrieval finds stating what it says. One LLM call per chapter then
+Code queries first: MiniRAG's mini query over the chapter (one small LLM call for its keywords, the search held to the
+chapter's ideas) marks the ideas it finds central; `SectionQuery` (0 LLM) gives the chapter's sections, joined into
+blocks, each with its KG ideas (`main` first), their relations and, for a heading with subheadings, its opening
+sentences. One LLM call per chapter then
 builds the outline from what each heading's edges state (the KG relations the extractor drew from this chapter's chunks,
 each with its keywords and its chunk's own description): for every heading the goals those edges teach (each goal holds
 edges and the ideas they join), and, block by block, the slides holding the goals (a slide's message is its goals and
@@ -23,6 +25,7 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
+from src.rag.kg_inventory import readable
 from src.utils.bullet_text import support_ratio
 from src.utils.config import Config
 from src.utils.content_cache import cached_json, digest
@@ -55,6 +58,7 @@ class OutlineAgent:
                  retrieval: Optional[Dict[int, object]] = None, kb_dir=None):
         self.model = model
         self.prompt = load("outline", domain)
+        self.goals_prompt = load("outline_goals", domain)
         self.retrieval, self.kb_dir = retrieval or {}, kb_dir
 
     # ── the query: blocks of sections, each with its ideas and what it states ──
@@ -117,13 +121,39 @@ class OutlineAgent:
             h = parent.get(h)
         return False
 
-    def dossier(self, query: SectionQuery, inventory: dict, b: dict) -> List[str]:
+    def main_ideas(self, query: SectionQuery, chapter, titles: Dict[int, str], inventory: dict) -> set:
+        """The chapter's K# that MiniRAG's mini query finds central (`aquery(mode="mini")`, its context only): the query
+        is the chapter's title and its headings', the search held to this chapter's inventory while it runs (the KG may
+        hold other documents). Its one LLM call reads the query's keywords; it is cached for the run like every agent
+        decision."""
+        retriever = getattr(getattr(query.retrieval, "store", None), "retriever", None)
+        if retriever is None:
+            return set()
+        text = " ".join(dict.fromkeys([chapter.title, *(titles[h] for h in chapter.heading_ids if titles.get(h))]))
+
+        async def llm(prompt: str, **_) -> str:
+            return cached_json(f"{_CACHE}.query", self.model, {"prompt": prompt},
+                               lambda: chat(self.model, [{"role": "user", "content": prompt}], temperature=0,
+                                            role="outline_query"))
+        kid = {node["name"]: k for k, node in inventory["nodes"].items()}
+        try:
+            names = retriever.mini_entities(text, llm, Config.OUTLINE_QUERY_TOP_K, Config.OUTLINE_QUERY_NODE_TOKENS,
+                                            scope=set(kid))
+        except Exception as exc:
+            raise RuntimeError(f"[outline] MiniRAG query failed for '{chapter.title[:60]}': "
+                               f"{type(exc).__name__}: {str(exc)[:160]}") from exc
+        main = {kid[name] for name in names if name in kid}
+        print(f"[Outline] {chapter.title[:60]}: MiniRAG query found {len(names)} entities, {len(main)} of this chapter")
+        return main
+
+    def dossier(self, query: SectionQuery, inventory: dict, b: dict, main: set = frozenset(),
+                opening: bool = False) -> List[str]:
         """The block's lines: `B# · chars`, then each section `S# heading · chars · assets` with its tables, figures,
-        every KG idea at home there (most mentioned first) and the ends of its edges at home elsewhere, then its edges
-        (`R# K# → K# [keywords · weight]: description`, in reading order). A section stating no edge shows instead the
-        sentences retrieval finds stating what it says (OUTLINE_GIST_SENTENCES, without ids)."""
+        every KG idea at home there (`main` ideas first, then the most mentioned) and the ends of its edges at home
+        elsewhere, then its edges (`R# K# → K# [keywords · weight]: description`, in reading order); an idea in `main`,
+        and an edge with an end in it, is marked `· main`. A heading with subheadings or stating no edge (every heading
+        with `opening`) ends with the first sentences of its own text."""
         nodes, relations = inventory["nodes"], inventory["relations"]
-        chapter = query.chapter
         lines = [f"{b['id']} · {b['chars'] / 1000:.1f}k chars"]
         for row in b["rows"]:
             assets = ", ".join(f"{n} {kind}" for kind, n in sorted(row["assets"].items()))
@@ -132,21 +162,26 @@ class OutlineAgent:
             lines.append(f"  {row['sid']} {row['title']} · {row['chars'] / 1000:.1f}k chars" + (f" · {assets}" if assets else "") + tree)
             lines += [f"    T: \"{t[:Config.OUTLINE_ASSET_CHARS]}\"" for t in row.get("tables") or []]
             lines += [f"    F: \"{f[:Config.OUTLINE_ASSET_CHARS]}\"" for f in row.get("figures") or [] if f]
-            ideas = sorted(row["ideas"], key=lambda k: -nodes[k].get("mentions", 0))
-            lines += [f"    {k} {nodes[k]['name']} ({nodes[k]['type']}) · {nodes[k].get('mentions', 0)}×" for k in ideas]
-            lines += [f"    {k} {nodes[k]['name']} ({nodes[k]['type']}) · at home elsewhere" for k in row.get("ends") or []]
+            mark = lambda *ks: " · main" if any(k in main for k in ks) else ""
+            # a heading stating no edge: what the KG says of each idea, when one chunk of this chapter said it (a merged
+            # description carries other documents' words)
+            said = lambda k: (f": {readable(nodes[k].get('description'))[:Config.OUTLINE_IDEA_CHARS]}"
+                              if not row.get("edges") and nodes[k].get("local") and nodes[k].get("description") else "")
+            ideas = sorted(row["ideas"], key=lambda k: (k not in main, -nodes[k].get("mentions", 0)))
+            lines += [f"    {k} {nodes[k]['name']} ({nodes[k]['type']}) · {nodes[k].get('mentions', 0)}×{mark(k)}{said(k)}"
+                      for k in ideas]
+            lines += [f"    {k} {nodes[k]['name']} ({nodes[k]['type']}) · at home elsewhere{mark(k)}"
+                      for k in row.get("ends") or []]
             for r in row.get("edges") or []:
                 x = relations[r]
                 tags = " · ".join(t for t in (x.get("keywords"), f"{x.get('weight', 0):g}") if t)
-                lines.append(f"    {r} {x['kid_a']} → {x['kid_b']} [{tags}]: {_said(x['description'])}")
-            if row.get("kids"):                          # its opening, so the model sees whether it only introduces them
+                lines.append(f"    {r} {x['kid_a']} → {x['kid_b']} [{tags}{mark(x['kid_a'], x['kid_b'])}]: "
+                             f"{_said(x['description'])}")
+            if row.get("kids") or opening or not row.get("edges"):   # whether it only introduces them, or what it says
+                chapter = query.chapter
                 opening = [chapter.sentences[s]["text"] for p in row["pids"] if chapter.by_pid[p]["kind"] == "text"
                            for s in chapter.by_pid[p]["sentences"]][:Config.OUTLINE_GIST_SENTENCES]
                 lines += [f"    \"{' '.join(t.split())[:Config.OUTLINE_GIST_CHARS]}\"" for t in opening]
-            elif not row.get("edges"):
-                names = [nodes[k]["name"] for k in (row["central"] or ideas[:Config.OUTLINE_GIST_SENTENCES])]
-                for hit in query.gist([row["hid"]], " ".join([row["title"], *names]), names, Config.OUTLINE_GIST_SENTENCES):
-                    lines.append(f"    \"{' '.join(hit['text'].split())[:Config.OUTLINE_GIST_CHARS]}\"")
         return lines
 
     # ── plan ───────────────────────────────────────────────────────────────────
@@ -158,8 +193,10 @@ class OutlineAgent:
         if not blocks:
             return self._finish(chapter, inventory, [], [], {}, {"paragraphs": [], "kg": []}, 0, 0)
         self.mark_tree(blocks, chapter, titles)
+        named = {row["sid"]: row["title"] for b in blocks for row in b.get("rows") or []}
         nodes = inventory["nodes"]
-        lines = [line for b in blocks for line in self.dossier(query, inventory, b)]
+        main = self.main_ideas(query, chapter, titles, inventory)
+        lines = [line for b in blocks for line in self.dossier(query, inventory, b, main)]
         payload = {"section": chapter.title, **({"language": chapter.language} if chapter.language else {}),
                    "blocks": lines, "slide_min_chars": Config.SECTION_SLIDE_MIN_CHARS, "slide_max_chars": self.slide_max_chars(),
                    "task": f"Write the goals every heading's edges teach, then the slides of all {len(blocks)} blocks "
@@ -168,11 +205,14 @@ class OutlineAgent:
         first, calls = answer, 1
         relations = inventory["relations"]
         rows, goals, issues = self.read(answer, blocks, nodes, relations)
-        if any(not self.code_settles(i) for i in issues):   # what code settles alone is not asked again
-            answer = self._ask(self.prompt, {**payload, "issues": issues}, "outline_fix", Config.OUTLINE_MAX_TOKENS) or {}
+        asked = self.goalless(issues)                    # what code settles alone is not asked again
+        if asked:
+            extra = self._ask(self.goals_prompt, self.goals_payload(query, inventory, blocks, main, asked, goals, payload),
+                              "outline_fix", Config.OUTLINE_GOALS_MAX_TOKENS) or {}
             calls += 1
+            answer = self.with_goals(answer, extra)
             again, goals_again, left_issues = self.read(answer, blocks, nodes, relations)
-            if len(left_issues) < len(issues):
+            if len(self.goalless(left_issues)) < len(asked):     # a new goal on no slide is settled by code
                 rows, goals, issues = again, goals_again, left_issues
                 first = answer
         parts = self.read_parts(first, blocks)
@@ -180,6 +220,7 @@ class OutlineAgent:
         rows, goals = self.settle_edges(rows, goals, blocks, nodes, relations)
         agenda = self.agenda_sections(blocks, goals)
         sid_hid = {row["sid"]: row["hid"] for b in blocks for row in b.get("rows") or []}
+        sid_pids = {row["sid"]: row["pids"] for b in blocks for row in b.get("rows") or []}
         agenda_pids = [p for b in blocks for row in b.get("rows") or [] if row["sid"] in agenda for p in row["pids"]]
         blocks, rows = self.without(blocks, rows, agenda)
         slides, fitted = self.split_heavy(self.allocate(rows, blocks, chapter, nodes), rows, chapter, nodes)
@@ -193,12 +234,14 @@ class OutlineAgent:
         for s_ in slides:                                # the outline's key ideas: final, the Packet Builder keeps them
             s_["keyed"] = list(s_["teaches"])
         slides = self.place(slides, nodes, left)
-        goals = self.place_goals(goals, slides, rows, chapter, nodes, relations)
+        goals = self.place_goals(goals, slides, sid_pids, chapter, nodes, relations)
         unplaced = self._unsettled(slides, [p for b in blocks for p in b["pids"]], nodes, left)
         openers = self.openers(chapter, titles, slides, goals, {sid_hid[x]: t for x, t in parts.items() if x in sid_hid},
                                {sid_hid[x] for x in agenda}, sid_hid)
         print(f"[Outline] {chapter.title}: {len(blocks)} block(s) -> {len(slides)} slide(s), {len(goals)} goal(s) in "
-              f"{calls} call(s); {len(agenda)} heading(s) only introducing their subheadings, {len(openers)} opener(s)"
+              f"{calls} call(s)"
+              f"{' (goals asked again for: ' + '; '.join(named.get(x, x) for x in asked) + ')' if asked else ''}"
+              f"; {len(agenda)} heading(s) only introducing their subheadings, {len(openers)} opener(s)"
               f"{'; settled by code: ' + '; '.join(issues[:3]) if issues else ''}"
               f"{'; slides fitted (split over what one slide holds, joined when too light): ' + '; '.join(fitted[:4]) if fitted else ''}")
         return self._finish(chapter, inventory, goals, slides, left, unplaced, calls, len(blocks), openers, agenda_pids)
@@ -213,8 +256,10 @@ class OutlineAgent:
         by_id = {b["id"]: b for b in blocks}
         order = {b["id"]: n for n, b in enumerate(blocks)}
         section = {row["sid"]: row for b in blocks for row in b.get("rows") or []}
-        goals, issues, owner, named_goal = [], [], {}, {}
+        goals, issues, owner, named_goal, whole = [], [], {}, {}, set()
         for g in answer.get("goals") or []:
+            if isinstance(g, dict) and g.get("whole"):
+                whole.add(_text(g.get("id")))
             if not isinstance(g, dict) or len(_text(g.get("goal"))) < 5 or g.get("whole"):
                 continue                                  # a part's goal introduces its subheadings: `read_parts`
             secs = [x for x in dict.fromkeys(_text(x) for x in g.get("sections") or []) if x in section]
@@ -242,8 +287,9 @@ class OutlineAgent:
             if not isinstance(row, dict):
                 continue
             title = _text(row.get("title"))
-            if len(title) < 2:
-                continue
+            held = [_text(v) for v in row.get("goals") or []]
+            if len(title) < 2 or (held and all(x in whole for x in held)):
+                continue                                  # a whole goal is on no slide: such a slide has nothing to teach
             mine = list(dict.fromkeys(named_goal[x] for x in (_text(v) for v in row.get("goals") or []) if x in named_goal))
             # the slide's block is where its headings are (its own, else its goals'): a mislabelled block id is ignored
             heads = [str(x) for x in row.get("sections") or [] if str(x) in block_of] or \
@@ -266,7 +312,8 @@ class OutlineAgent:
                          "message": OutlineAgent.message([goals[n] for n in mine], relations), "sections": named})
         rows.sort(key=lambda r: order[r["block"]])                 # stable: the model's order within a block
         covered = {x for g in goals for x in g["sections"]}
-        bare = [x for x in section if x not in covered and not section[x].get("kids")]   # a part may only introduce
+        # a part may only introduce its subheadings; one whose own text states an edge or holds an asset needs a goal
+        bare = [x for x in section if x not in covered and not OutlineAgent.introduces(section[x])]
         if bare:
             issues.append(f"{', '.join(bare)} {'has' if len(bare) == 1 else 'have'} no goal: every heading has the goals its edges teach")
         loose = {x: [r for r in row.get("edges") or [] if r not in owner] for x, row in section.items()}
@@ -327,6 +374,40 @@ class OutlineAgent:
         return f"{', '.join(missing)} on no slide" if missing else None
 
     @staticmethod
+    def goalless(issues: List[str]) -> List[str]:
+        """The S# of the headings `read` found without a goal: the only issue the model is asked about again."""
+        return list(dict.fromkeys(x for i in issues if _ASKED.match(i) for x in re.findall(r"S\d+", i.split(" ha")[0])))
+
+    def goals_payload(self, query: SectionQuery, inventory: dict, blocks: List[dict], main: set, asked: List[str],
+                      goals: List[dict], payload: dict) -> dict:
+        """What the model is asked again: the dossier lines of the headings left without a goal (with their opening
+        sentences) and the goals the others have."""
+        lines = []
+        for b in blocks:
+            rows = [r for r in b.get("rows") or [] if r["sid"] in asked]
+            if rows:
+                lines += self.dossier(query, inventory, {**b, "rows": rows}, main, opening=True)[1:]
+        return {"section": payload["section"], **({"language": payload["language"]} if "language" in payload else {}),
+                "headings": [line[2:] if line.startswith("  ") else line for line in lines],
+                "goals": [g["goal"] for g in goals],
+                "task": f"Write the goals of {', '.join(asked)}, as the output schema says."}
+
+    @staticmethod
+    def with_goals(answer: dict, extra: dict) -> dict:
+        """The answer with the goals asked again added after its own, each under an id none of its goals has."""
+        taken = {_text(g.get("id")) for g in answer.get("goals") or [] if isinstance(g, dict)}
+        added = []
+        for g in extra.get("goals") or []:
+            if not isinstance(g, dict):
+                continue
+            gid, n = _text(g.get("id")), len(taken) + 1
+            while not gid or gid in taken:
+                gid, n = f"G{n}", n + 1
+            taken.add(gid)
+            added.append({**g, "id": gid, "whole": False})
+        return {**answer, "goals": list(answer.get("goals") or []) + added}
+
+    @staticmethod
     def code_settles(issue: str) -> bool:
         """An issue code settles without asking again: every one but headings left without a goal (what they teach
         would be missing). `settle_edges` places left edges, splits goals of unrelated edges and puts goals on slides;
@@ -380,7 +461,7 @@ class OutlineAgent:
         """{heading id: {title, goal, agenda, before}}: the chapter's own opener, and one for every heading that only
         introduces its subheadings (or has no text of its own) whose part fills at least two slides. Its agenda is its
         subheadings' goals in order: a subheading with subheadings of its own by its part goal, any other by its goals
-        (by its title when code wrote them from its ideas), each with the slides that teach it; `before` is the first
+        (by its title when it has none), each with the slides that teach it; `before` is the first
         slide of the part."""
         parent = getattr(chapter, "parent_of", None) or {}
         kids: Dict[int, List[int]] = {}
@@ -402,7 +483,7 @@ class OutlineAgent:
                     seen.add(text)
                     items.append({"text": text, "slides": where})
             for n, g in enumerate(goals):                # what the heading's own text teaches comes first
-                if top in about[n] and not about[n] - {top} and not g.get("made"):
+                if top in about[n] and not about[n] - {top}:
                     add(g["goal"], [slides[i] for i in g["slides"]])
             for c in kids[top]:
                 if kids.get(c):
@@ -410,10 +491,9 @@ class OutlineAgent:
                     continue
                 held = [g for n, g in enumerate(goals) if c in about[n]]
                 for g in held:
-                    if not g.get("made"):
-                        add(g["goal"], [slides[i] for i in g["slides"]])
-                if held and all(g.get("made") for g in held):   # a goal code wrote from its ideas: the heading names it
-                    add(titles.get(c), [slides[i] for g in held for i in g["slides"]])
+                    add(g["goal"], [slides[i] for i in g["slides"]])
+                if not held:                             # a heading the model gave no goal: its title names it
+                    add(titles.get(c), part(c))
             out[top] = {"title": titles.get(top) or chapter.title, "goal": parts.get(top) or titles.get(top) or chapter.title,
                         "agenda": items, "before": mine[0]}
         return out
@@ -452,9 +532,11 @@ class OutlineAgent:
     @staticmethod
     def settle_edges(rows: List[dict], goals: List[dict], blocks: List[dict], nodes: dict,
                      relations: dict) -> Tuple[List[dict], List[dict]]:
-        """The goals made whole without inventing. An edge in no goal joins a goal of its heading holding one of its
-        ends, else the last goal of its heading; a heading with no goal gets one naming its heading and ideas; a goal on no slide joins the last slide of its headings (a new one when none); a slide with no
-        goal takes its headings' goals. Goals end in the order their slides come; each slide's key and message follow."""
+        """The goals made whole without inventing: code writes no goal. An edge in no goal joins a goal of its heading
+        holding one of its ends, else the last goal of its heading (a heading the model left without a goal keeps its
+        edges out of every goal: its slide is written from its passages alone); a goal on no slide joins the last slide
+        of its headings (a new one when none); a slide with no goal takes its headings' goals. Goals end in the order
+        their slides come; each slide's key and message follow."""
         heading = {row["sid"]: (b["id"], row) for b in blocks for row in b.get("rows") or []}
         owner = {r: n for n, g in enumerate(goals) for r in g["edges"]}
         for sid, (_, row) in heading.items():
@@ -465,18 +547,11 @@ class OutlineAgent:
                 mine = [n for n, g in enumerate(goals) if sid in g["sections"]]
                 n = next((n for n in mine if ends & set(goals[n]["key"])), mine[-1] if mine else None)
                 if n is None:
-                    ideas = sorted(row["ideas"], key=lambda k: -nodes[k].get("mentions", 0))
-                    goals.append({"goal": row["title"] + (": " + ", ".join(nodes[k]["name"] for k in ideas) if ideas else ""),
-                                  "sections": [sid], "edges": [], "key": ideas, "questions": [], "made": True})
-                    n = len(goals) - 1
+                    continue
                 goals[n]["edges"].append(r)
                 goals[n]["key"] += [k for k in (relations[r]["kid_a"], relations[r]["kid_b"]) if k not in goals[n]["key"]]
                 goals[n]["questions"].append(_said(relations[r]["description"]))
                 owner[r] = n
-            if not any(sid in g["sections"] for g in goals) and not OutlineAgent.introduces(row):
-                ideas = sorted(row["ideas"], key=lambda k: -nodes[k].get("mentions", 0))
-                text = row["title"] + (": " + ", ".join(nodes[k]["name"] for k in ideas) if ideas else "")
-                goals.append({"goal": text, "sections": [sid], "edges": [], "key": ideas, "questions": [], "made": True})
         placed = {n for r in rows for n in r["goals"]}
         for n, g in enumerate(goals):
             if n in placed:
@@ -513,23 +588,22 @@ class OutlineAgent:
         return rows, goals
 
     @staticmethod
-    def place_goals(goals: List[dict], slides: List[dict], rows: List[dict], chapter, nodes: dict,
+    def place_goals(goals: List[dict], slides: List[dict], sid_pids: Dict[str, List[str]], chapter, nodes: dict,
                     relations: dict) -> List[dict]:
-        """Each goal on the slides holding what it teaches: the paragraphs stating its edges (for a goal without edges,
-        the slides teaching its ideas), else the slides its row was planned on; each slide's message is the sentences of
-        the goals it opens: a slide continuing a goal (`continues`) gets none, so it writes what its own passages add
-        instead of introducing the goal's subject again. Goals in the order of their first slide."""
-        index = {id(s): n for n, s in enumerate(slides)}
+        """Each goal on the slides holding the text of its own headings, narrowed to those stating its edges, else to
+        those teaching its ideas; a goal whose headings are on no slide goes where its edges are stated, else where its
+        ideas are taught. Each slide's message is the sentences of the goals it opens: a slide continuing a goal
+        (`continues`) gets none, so it writes what its own passages add instead of introducing the goal's subject
+        again. Goals in the order of their first slide."""
         at = {p: n for n, s in enumerate(slides) for p in s["paragraphs"]}
         stated = lambda r: {at[chapter.pid_of[s]] for s in relations[r]["sentences"]
                             if chapter.pid_of.get(s) in at}
         out = []
-        for n, g in enumerate(goals):
-            where = {i for r in g["edges"] for i in stated(r)}
-            if not where:
-                where = {i for i, s in enumerate(slides) if set(g["key"]) & set(s["teaches"])}
-            if not where:
-                where = {index[id(r["obj"])] for r in rows if n in r["goals"] and id(r.get("obj")) in index}
+        for g in goals:
+            own = {at[p] for x in g.get("sections") or [] for p in sid_pids.get(x) or [] if p in at}
+            edged = {i for r in g["edges"] for i in stated(r)}
+            keyed = {i for i, s in enumerate(slides) if set(g["key"]) & set(s["teaches"])}
+            where = ((own & edged) or (own & keyed) or own) if own else (edged or keyed)
             if where:
                 out.append({**g, "slides": sorted(where)})
         out.sort(key=lambda g: g["slides"][0])
@@ -539,8 +613,8 @@ class OutlineAgent:
             # a goal's sentence opens only its first slide: a slide continuing it is told nothing but its own passages
             mine = [{**g, "goal": g["goal"] if g["slides"][0] == i else ""} for g in held]
             s["message"] = OutlineAgent.message(mine, relations) or ("" if s["continues"] else s.get("message", ""))
-        return [{"goal": g["goal"], "questions": g["questions"], "slides": g["slides"], "sections": g.get("sections", []),
-                 "made": g.get("made", False)} for g in out]
+        return [{"goal": g["goal"], "questions": g["questions"], "slides": g["slides"], "sections": g.get("sections", [])}
+                for g in out]
 
     # ── paragraphs: each slide's consecutive share of its block ────────────────
     @staticmethod
@@ -622,14 +696,11 @@ class OutlineAgent:
                     host = mine[max(k for k in kept if k < n)]["slide"]
                     print(f"[outline] '{r['title']}' got no paragraph of its own: joined to '{host['title']}'")
                     host["teaches"] += [k for k in r["key"] if k not in host["teaches"]]
-                    r["joined"] = host
                     continue
                 end = next((starts[k] for k in kept if k > n), len(pids))
                 slides.append({"block": b["id"], "title": r["title"], "message": r["message"],
                                "teaches": list(r["key"]), "paragraphs": pids[starts[n]:end], "row": r})
                 r["slide"] = slides[-1]
-        for r in rows:                                   # each goal row points at the slide that holds it
-            r["obj"] = r.get("slide") or r.get("joined")
         return slides
 
     # ── a slide over what one slide holds ──────────────────────────────────────
@@ -666,13 +737,14 @@ class OutlineAgent:
     @staticmethod
     def join_light(slides: List[dict], chapter):
         """A text slide whose paragraphs cannot fill a slide (under SECTION_SLIDE_MIN_CHARS: fewer than QA_THIN_BULLETS
-        bullets) joins a neighbour, when together they stay within what one slide holds, so its content is taught there
-        instead of being dropped as thin; a slide drawing a table, formula, listing or figure stays. It joins, in order:
-        (the one before it first) a neighbour of its subject (a goal in common, the Outline's own judgement, or the headings where they meet linked
-        in the document's outline below the chapter's top headings: one the other's parent, or both under one such
-        heading); else a short neighbour, the two pooling until they fill a slide; else a full neighbour that has not yet
-        taken a part of another subject: one such part a slide, so no slide becomes a chain of unrelated
-        headings. Returns the slides and what was joined."""
+        bullets) joins a neighbour of its subject, when together they stay within what one slide holds, so its content
+        is taught there instead of being dropped as thin; a slide drawing a table, formula, listing or figure stays. A
+        neighbour of its subject (the one before it first): a goal in common (the Outline's own judgement), or the
+        headings where they meet linked in the document's outline below the chapter's top headings (one the other's
+        parent, or both under one such heading); else a light neighbour whose heading where they meet is a sibling of
+        its own (one parent, the chapter's top included), the two pooling until they fill a slide. A light slide with
+        neither stays alone (QA fills it or drops it): a heading at the end of its branch never joins the next branch,
+        and no slide takes a part of another subject. Returns the slides and what was joined."""
         text = lambda s: sum(chapter.size(p) for p in s["paragraphs"] if chapter.by_pid[p]["kind"] == "text")
         drawn = lambda s: any(chapter.by_pid[p]["kind"] != "text" for p in s["paragraphs"])
         light = lambda s: text(s) < Config.SECTION_SLIDE_MIN_CHARS and not drawn(s)
@@ -684,29 +756,29 @@ class OutlineAgent:
         goals = lambda s: set((s.get("row") or {}).get("goals") or [])
         def one_subject(first, second):
             return bool(goals(first) & goals(second)) or linked(head(first, -1), head(second, 0))
-        out, joined, mixed = list(slides), [], set()     # mixed: slides already holding a part of another subject
+        def sibling(first, second):
+            x, y = head(first, -1), head(second, 0)
+            return x in parent and parent.get(x) == parent.get(y)
+        out, joined = list(slides), []
+        most = OutlineAgent.slide_max_chars()              # never past what one slide holds
         n = 0
         while n < len(out):
             s = out[n]
-            most = OutlineAgent.slide_max_chars()          # never past what one slide holds
-            def rank(m):
-                if one_subject(*((out[m], s) if m < n else (s, out[m]))):
-                    return 0
-                return 1 if light(out[m]) else (2 if id(out[m]) not in mixed else None)
-            mates = sorted((r, m > n, m) for m in (n - 1, n + 1)
-                           if 0 <= m < len(out) and text(out[m]) + text(s) <= most and (r := rank(m)) is not None)
+            pair = lambda m: (out[m], s) if m < n else (s, out[m])
+            mates = sorted((not one_subject(*pair(m)), m > n, m) for m in (n - 1, n + 1)
+                           if 0 <= m < len(out) and text(out[m]) + text(s) <= most
+                           and (one_subject(*pair(m)) or (light(out[m]) and sibling(*pair(m)))))
             if not light(s) or not mates:
                 n += 1
                 continue
-            order, _, m = mates[0]
+            m = mates[0][2]
             host = out[m]
             first, second = (host, s) if m < n else (s, host)
             joined.append(f"joined '{second['title']}' to '{first['title']}'")
             host["paragraphs"] = first["paragraphs"] + second["paragraphs"]
             host["title"] = first["title"]                 # the slide that opens the subject names it
             host["teaches"] = list(dict.fromkeys(first["teaches"] + second["teaches"]))
-            if order or id(s) in mixed:
-                mixed.add(id(host))
+            host["row"] = {**(host.get("row") or {}), "goals": sorted(goals(first) | goals(second))}
             out.pop(n)
             n = max(0, n - 1)
         return out, joined

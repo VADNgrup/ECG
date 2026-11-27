@@ -44,3 +44,4 @@ class WorkflowState(TypedDict):
     scope_manifest: Optional[Dict[str, Any]]
     unit_plans: Optional[List[Dict[str, Any]]]
     labels: Optional[Dict[str, str]]
+    numbered: Optional[Dict[str, List[int]]]   # numbers the scope's text gives figures / tables ("Table 1")

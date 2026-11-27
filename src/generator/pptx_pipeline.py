@@ -244,17 +244,116 @@ def _bullet_provenance(entry, info):
 
 
 def embedded_deck_themes() -> list[dict]:
-    """Return every curated design in the renderer's manifest format."""
+    """Every curated design in the renderer's manifest format: each deck embeds them all (one slide master per design,
+    listed under Design > This Presentation; PowerPoint's Layout gallery then lists each layout once per design), and
+    the fonts of all of them are measured (font_metrics.py)."""
     return [deck_pptx_exporter._design_spec_to_theme(
         deck_pptx_exporter._validate_and_fill_design_spec({"theme_name": item["name"]}, 0))
         for item in deck_pptx_exporter.THEME_LIBRARY]
 
 
-def contents_entries(dividers: list[dict], slides: list[dict]) -> list[dict]:
-    """What Contents lists: the deck's own first level that branches -- its dividers when it has several, else its
-    content slides (the pieces of one split slide, sharing its title, listed once); nothing when nothing branches."""
-    level = dividers if len(dividers) > 1 else         [s for i, s in enumerate(slides) if i == 0 or s["title"] != slides[i - 1]["title"]]
-    return level if len(level) > 1 else []
+def divider_depths(dividers: list[dict], parents: dict) -> None:
+    """Sets each divider's `depth`: how many of the deck's other dividers are its ancestors in the document's heading
+    tree (`parents`: heading id -> parent id), so a part is 0, its chapters 1, a chapter's sections 2; 0 for every
+    divider when the tree is not known."""
+    nodes = {str(d.get("node")) for d in dividers}
+    for d in dividers:
+        n, seen, depth = parents.get(str(d.get("node"))), set(), 0
+        while n is not None and n not in seen:
+            seen.add(n)
+            depth += n in nodes
+            n = parents.get(n)
+        d["depth"] = depth
+
+
+def _depth(d: dict) -> int:
+    return d.get("depth", 0)
+
+
+def _branching_level(dividers: list[dict]):
+    """(the dividers' depths, the shallowest one that has more than one divider -- None when none has)."""
+    levels = sorted({_depth(d) for d in dividers})
+    return levels, next((lv for lv in levels if sum(_depth(d) == lv for d in dividers) > 1), None)
+
+
+def contents_entries(dividers: list[dict], slides: list[dict], max_rows: int = 0) -> list[dict]:
+    """What Contents lists: the deck's own first level that branches -- its dividers when they branch, else its
+    content slides (the pieces of one split slide, sharing its title, listed once); nothing when nothing branches.
+    Deeper divider levels join it, each entry under its parent, while the list keeps within `max_rows` rows -- or,
+    while it is shorter than one column (fit_model.TOC_ROWS), while it still fits one page; the entries then carry
+    their `level` (0 = the first level listed)."""
+    max_rows = max_rows or fm.TOC_ROWS_MULTI * Config.TOC_GLANCE_COLS
+    levels, start = _branching_level(dividers)
+    if start is None:
+        level = [s for i, s in enumerate(slides) if i == 0 or s["title"] != slides[i - 1]["title"]]
+        return level if len(level) > 1 else []
+    keep = [start]
+    for lv in (lv for lv in levels if lv > start):
+        listed = sum(_depth(d) in keep for d in dividers)
+        rows = listed + sum(_depth(d) == lv for d in dividers)
+        if rows > max_rows and not (listed < fm.TOC_ROWS and rows <= fm.TOC_ROWS_MULTI * fm.TOC_COLS):
+            break
+        keep.append(lv)
+    if len(keep) == 1:
+        return [d for d in dividers if _depth(d) == start]
+    return [{**d, "level": keep.index(_depth(d))} for d in dividers if _depth(d) in keep]
+
+
+def contents_numbers(entries: list[dict]) -> None:
+    """Sets each Contents entry's `group` and `n`: an entry with entries of its own right under it heads them,
+    unnumbered; the others are numbered 01, 02, ... in deck order."""
+    n = 0
+    for i, e in enumerate(entries):
+        e["group"] = i + 1 < len(entries) and entries[i + 1].get("level", 0) > e.get("level", 0)
+        if not e["group"]:
+            n += 1
+        e["n"] = "" if e["group"] else f"{n:02d}"
+
+
+def _children(dividers: list[dict], i: int) -> list[dict]:
+    """The dividers right under divider i: one level deeper, after it and before the next one at its level or above."""
+    kids = []
+    for d in dividers[i + 1:]:
+        if _depth(d) <= _depth(dividers[i]):
+            break
+        if _depth(d) == _depth(dividers[i]) + 1:
+            kids.append(d)
+    return kids
+
+
+def _span(kids: list[dict]) -> str:
+    """The span of numbered headings that share one label ("Chapter 1–8", from the headings' own "Chapter 1." ...
+    "Chapter 8."); "" when they are not all numbered under one label."""
+    heads = [divider_head(k["title"]) for k in kids]
+    words = {kicker[:len(kicker) - len(num)].strip() for kicker, num, _ in heads}
+    if not heads or any(not num for _, num, _ in heads) or len(words) != 1:
+        return ""
+    first, last, word = heads[0][1], heads[-1][1], words.pop()
+    return f"{word} {first}" if first == last else f"{word} {first}–{last}"
+
+
+def deck_summary(dividers: list[dict], recap: list[str], max_items: int = 0) -> list[str]:
+    """The closing slide's recap. A deck of one chapter: that chapter's goals (`recap`). A deck of several: its
+    structure -- the deepest divider level that lists in at most `max_items` lines and has an entry under every entry
+    of the level above it, each line with the span of the numbered headings right under it ("Part I. ... (Chapter
+    1–8)"); nothing when even the first level that branches is longer."""
+    max_items = max_items or Config.END_SUMMARY_MAX_ITEMS
+    if sum(1 for d in dividers if d.get("own")) <= 1:
+        return recap[:max_items]
+    levels, start = _branching_level(dividers)
+    at = lambda lv: [i for i, d in enumerate(dividers) if _depth(d) == lv]
+    if start is None or len(at(start)) > max_items:
+        return []
+    chosen = start
+    for lv in (lv for lv in levels if lv > start):
+        if len(at(lv)) > max_items or not all(_children(dividers, i) for i in at(chosen)):
+            break
+        chosen = lv
+    lines = []
+    for i in at(chosen):
+        span = _span(_children(dividers, i))
+        lines.append(f"{dividers[i]['title']} ({span})" if span else dividers[i]["title"])
+    return lines
 
 
 def source_title(meta: dict, title: str) -> str:
@@ -364,7 +463,8 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
                            "source_slide_number": source_num,
                            "source_heading_id": info.get("kg_node_id"), "is_light": light,
                            "layout_id": "section_divider_layout"})
-            toc_entries.append({"title": heading, "source_slide_number": source_num})
+            toc_entries.append({"title": heading, "source_slide_number": source_num, "node": info.get("kg_node_id"),
+                                "own": root is not None and root == info.get("kg_node_id")})
             recap += [g for g in (info.get("grounding") or {}).get("agenda") or [] if g not in recap]
             audit.append({"slide_number": source_num, "kind": "section-divider",
                           "density": None, "support": "exempt", "layout_eligible": True})
@@ -595,26 +695,31 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
                       "image_provenance": image_provenance})
     meta = data.get("metadata") or {}
     labels = meta.get("labels") or {}
-    summary, source = recap[:Config.END_SUMMARY_MAX_ITEMS], source_title(meta, title)
+    name_visuals(slides, labels, meta.get("numbered") or {})
+    tree = (_read(json_path.parent / f"{lecture_id}_scope_manifest.json", {}) or {}).get("heading_tree") or []
+    divider_depths(toc_entries, {str(row["id"]): str(row["parent"]) for row in tree
+                                 if row.get("id") is not None and row.get("parent") is not None})
+    summary, source = deck_summary(toc_entries, recap), source_title(meta, title)
     kind, variant = end_design(lecture_id, [name for name, part in (("recap", summary), ("source", source)) if part])
     slides.append({"type": kind, "variant": variant, "title": labels.get("thanks") or "Thank you", "is_light": light,
                    "layout_id": "end_layout", "summary": summary, "source": source})
     toc_entries = contents_entries(toc_entries, slide_entries)
+    contents_numbers(toc_entries)
     page_map_seed = {}
     for num, slide in enumerate(slides, 1):
         if "source_slide_number" in slide:
             page_map_seed.setdefault(str(slide["source_slide_number"]), []).append(num)
-    per_toc = 30                      # up to 3 columns x 10 rows on one contents page (deck_pptx_gen.js TOC_*)
+    per_toc = fm.TOC_ROWS_MULTI * fm.TOC_COLS          # the most rows one contents page draws
     toc_count = (len(toc_entries) + per_toc - 1) // per_toc
     toc_pages = []
     for page_i in range(toc_count):
         chunk = toc_entries[page_i * per_toc:(page_i + 1) * per_toc]
         items = []
-        for local_i, entry in enumerate(chunk):
+        for entry in chunk:
             source = str(entry["source_slide_number"])
             target = page_map_seed.get(source, [2])[0] + toc_count
-            items.append({"n": f"{page_i * per_toc + local_i + 1:02d}",
-                          "t": entry["title"], "p": target})
+            items.append({"n": entry["n"], "t": entry["title"], "p": target,
+                          "level": entry.get("level", 0), "group": entry["group"]})
         toc_pages.append({"type": "toc_sidebar", "title": labels.get("contents") or "Contents", "toc_items": items, "layout_id": "toc_layout",
                           "is_light": light, "toc_page": page_i + 1, "toc_total": toc_count})
     slides[1:1] = toc_pages
@@ -629,16 +734,54 @@ def build_manifest(json_path, *, title=None, speaker="", institution=""):
                                              "color": theme.get("accent", "2864DC")})
     for t in toc_entries:
         t["pages"] = page_map.get(str(t["source_slide_number"]), [])
-    embedded_themes = embedded_deck_themes()
-    # Put the selected design first.  Slides initially remain attached to this
-    # master while the other designs are available under "This Presentation".
-    embedded_themes.sort(key=lambda item: item.get("name") != theme.get("name"))
+    # the deck's own design first: its slides stay on that master, the others wait under Design > This Presentation
+    embedded_themes = sorted(embedded_deck_themes(), key=lambda item: item.get("name") != theme.get("name"))
     return {"version": PIPELINE_VERSION, "qa_report": data.get("qa_report", {}), "layout_notes": layout_notes,
             "lecture_title": title, "speaker": speaker, "institution": institution, "theme": theme, "labels": labels,
             "date": str(meta.get("generated_at") or datetime.now().isoformat())[:10],
             "active_theme_name": theme.get("name", ""), "embedded_themes": embedded_themes,
             "layouts": all_layouts(), "slides": slides,
             "source_page_map": page_map, "contents": toc_entries, "audit": audit}
+
+
+def name_visuals(slides: list, labels: dict, numbered: dict = None) -> None:
+    """A figure or table the document prints no caption for is named by its kind and its number in the deck ("Figure 3",
+    in the deck's language): never a description the document does not give. Captioned ones keep the document's, and
+    a number the document itself gives that kind (`numbered`: in its text, "given in Table 1"; or a caption) is not
+    used again."""
+    words = {kind: labels.get(kind) or kind.capitalize() for kind in ("figure", "table")}
+    captions = " ".join(str(c) for sl in slides for c in [sl.get("caption"), *(sl.get("captions") or []),
+                                                           (sl.get("parsed_table") or {}).get("caption"),
+                                                           (sl.get("table") or {}).get("table_caption")] if c)
+    taken = {kind: set((numbered or {}).get(kind) or []) | {int(n) for n in re.findall(
+        rf"\b{re.escape(w)}\.?\s*(\d+)\b", captions, re.IGNORECASE)} for kind, w in words.items()}
+    count = {"figure": 0, "table": 0}
+
+    def name(kind: str, own: str) -> str:
+        if own:
+            return own
+        count[kind] += 1
+        while count[kind] in taken[kind]:
+            count[kind] += 1
+        return f"{words[kind]} {count[kind]}"
+
+    for slide in slides:
+        images = [i for i in slide.get("images") or [] if i]
+        if images:
+            pair = "captions" in slide
+            own = list(slide.get("captions") or []) if pair else [slide.get("caption") or ""]
+            named = [name("figure", c) for c in (own + [""] * len(images))[:len(images)]]
+            if pair:
+                slide["captions"] = named
+            else:
+                slide["caption"] = named[0]
+        table, parsed = slide.get("table") or {}, slide.get("parsed_table") or {}
+        if table.get("table_markdown") or parsed:
+            caption = name("table", parsed.get("caption") or table.get("table_caption") or "")
+            if parsed:
+                parsed["caption"] = caption
+            if isinstance(slide.get("table"), dict):
+                slide["table"]["table_caption"] = caption
 
 
 def export_native(json_path, output_path, *, title=None, speaker="", institution=""):

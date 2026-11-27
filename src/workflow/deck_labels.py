@@ -12,7 +12,8 @@ from src.utils.content_cache import cached_json, digest
 from src.utils.llm import chat, parse_json_reply
 from src.workflow.prompts import load
 
-KEYS = ("lecture", "section", "contents", "where", "thanks", "summary", "source", "presenter", "institution")
+KEYS = ("lecture", "section", "contents", "where", "thanks", "summary", "source", "presenter", "institution",
+        "figure", "table")
 
 
 def sample(chapter) -> List[str]:

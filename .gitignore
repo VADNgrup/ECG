@@ -15,7 +15,8 @@ ENV/
 # secrets and local settings
 .env
 .vscode/
-.claude/
+.claude/settings.local.json
+.claude/skills/
 CLAUDE.md
 
 # OS / Office
@@ -35,7 +36,7 @@ tests/pytest_*/
 tests/codex_tmp/
 tests/
 # pipeline data: only the source PDFs in data/raw/ are kept
-data/raw/_*/
+data/raw/_trimmed/
 data/assets/*
 data/context/*
 data/lectures/*

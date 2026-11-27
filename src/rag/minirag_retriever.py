@@ -5,16 +5,86 @@ and entity names, which `EvidenceStore` maps to source sentences with IDs and of
 """
 import asyncio
 import json
+import re
 import threading
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
+
+from minirag.base import QueryParam
+from minirag.operate import minirag_query
+from minirag.utils import csv_string_to_list, merge_tuples
 
 from src.rag import build_kg as B
 from src.utils.config import Config
 from src.utils.content_cache import cached_json
 
 _SEP = "<SEP>"
+_ENTITY_TABLE = re.compile(r"-----Entities-----\s*```csv\s*(.*?)```", re.S)
+
+
+class _ScopedStore:
+    """A MiniRAG vector store whose `query` only returns the rows `keep` accepts (NanoVectorDB's `filter_lambda`), so
+    its top-k is the top-k of the scope, not of the whole KB."""
+
+    def __init__(self, store, keep: Callable[[dict], bool]):
+        self.store, self.keep = store, keep
+
+    async def query(self, query: str, top_k: int = 5) -> List[dict]:
+        vector = (await self.store.embedding_func([query]))[0]
+        kept = []
+
+        def keep(row) -> bool:
+            kept.append(self.keep(row))
+            return kept[-1]
+        try:
+            rows = self.store._client.query(query=vector, top_k=top_k, filter_lambda=keep,
+                                            better_than_threshold=self.store.cosine_better_than_threshold)
+        except IndexError:
+            if any(kept):
+                raise
+            return []                            # nothing of the scope in this store (NanoVectorDB fails on an empty filter)
+        return [{**row, "id": row["__id__"], "distance": row["__metrics__"]} for row in rows]
+
+
+class _ScopedGraph:
+    """MiniRAG's graph storage held to a set of entities: types, type lookups and k-hop paths only see them; entity
+    types compare in lower case (the graph stores `concept`, the keyword step may answer `CONCEPT`)."""
+
+    def __init__(self, storage, names: set):
+        self.storage, self.names = storage, names
+        self.graph = storage._graph.subgraph(names)
+
+    async def get_types(self):
+        types = {str(d.get("entity_type", "")).strip('"').lower() for _, d in self.graph.nodes(data=True)}
+        types.discard("")
+        return sorted(types), sorted(types)
+
+    async def get_node_from_types(self, type_list) -> List[dict]:
+        wanted = {str(t).strip('"').lower() for t in type_list or []}
+        return [{**d, "entity_name": n} for n, d in self.graph.nodes(data=True)
+                if str(d.get("entity_type", "")).strip('"').lower() in wanted]
+
+    async def get_neighbors_within_k_hops(self, name: str, k: int) -> list:
+        if name not in self.graph:
+            return []
+        paths = list(self.graph.edges(name))
+        for _ in range(k - 1):
+            paths = [t for p in paths for t in merge_tuples([p], list(self.graph.edges(p[-1])))]
+        return paths
+
+    async def get_node(self, name: str):
+        return await self.storage.get_node(name)
+
+    async def get_edge(self, a: str, b: str):
+        return await self.storage.get_edge(a, b)
+
+
+def context_entities(context) -> List[str]:
+    """Entity names of a mini-mode context's `-----Entities-----` csv table (entity, score, description), best first."""
+    table = _ENTITY_TABLE.search(str(context or ""))
+    rows = csv_string_to_list(table.group(1).strip()) if table else []
+    return [row[0] for row in rows[1:] if row and row[0]]
 
 
 _LOOP: Optional[asyncio.AbstractEventLoop] = None
@@ -178,6 +248,32 @@ class MiniRAGRetriever:
             return []
         edges = _run(rag.chunk_entity_relation_graph.get_node_edges(name)) or []
         return [b if a == name else a for a, b in edges]
+
+    def mini_entities(self, query: str, llm: Callable[[str], Awaitable[str]], top_k: int, node_tokens: int,
+                      scope: Optional[set] = None) -> List[str]:
+        """The entities MiniRAG's mini query (what `aquery(mode="mini")` runs) finds for `query`, best first, with only
+        its context asked for (no answer written): `llm` reads the query's keywords, the KB's stores and graph find the
+        entities. `scope` (entity names) holds the search inside them while it runs: the name, relation and chunk
+        indexes and the graph's paths and type lookups see only those entities, their relations and their chunks.
+        [] when the KB is unavailable or the query finds nothing."""
+        rag = self.rag
+        if rag is None or not query.strip():
+            return []
+        self.stats["mini_queries"] += 1
+        graph = rag.chunk_entity_relation_graph
+        names_vdb, relations_vdb, chunks_vdb = rag.entity_name_vdb, rag.relationships_vdb, rag.chunks_vdb
+        if scope is not None:
+            names = {n for n in scope if graph._graph.has_node(n)}
+            chunks = {c for n in names for c in str(graph._graph.nodes[n].get("source_id", "")).split(_SEP) if c}
+            graph = _ScopedGraph(graph, names)
+            names_vdb = _ScopedStore(names_vdb, lambda row: row.get("entity_name") in names)
+            relations_vdb = _ScopedStore(relations_vdb,
+                                         lambda row: row.get("src_id") in names and row.get("tgt_id") in names)
+            chunks_vdb = _ScopedStore(chunks_vdb, lambda row: row.get("__id__") in chunks)
+        param = QueryParam(mode="mini", only_need_context=True, top_k=top_k, max_token_for_node_context=node_tokens)
+        context = _run(minirag_query(query, graph, rag.entities_vdb, names_vdb, relations_vdb, chunks_vdb,
+                                     rag.text_chunks, rag.embedding_func, param, {"llm_model_func": llm}))
+        return context_entities(context)
 
     def mini_context(self, query: str, allowed_chunks=None) -> str:
         """A small cached context assembled directly from MiniRAG's indexes.

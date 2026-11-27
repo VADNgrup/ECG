@@ -9,17 +9,27 @@ relation the extractor synthesized is kept only when a sentence of the chapter s
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import threading
 from collections import Counter
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
 
-from src.rag.embedder import embed_transient
 from src.rag.kg_schema import clean_type, infer_node_kind, name_patterns
 from src.rag.structural import HEAD_MARK
 
 _SEP = "<SEP>"
+
+
+def readable(description: str) -> str:
+    """A KG description as one text: the extractor's merged descriptions of an idea, joined by '; '."""
+    return "; ".join(part.strip() for part in str(description or "").split(_SEP) if part.strip())
+
+
 _NOT_STATED = ("mentions", "contains", "illustrates", "has_asset")
 _VARIABLE = re.compile(r"[A-Za-z]_\w*")                                # X_train, y_train_5, n_correct: program variables
 _NUMBER = re.compile(r"[\d.,\s×x]+(\s*\w+)?")                            # "5", "60,000 images", "28×28 pixels"
@@ -80,6 +90,88 @@ def _home_index(chapter, index: dict):
     return find
 
 
+def _unit_home(chapter, index: dict, units: List[dict]):
+    """A function node name -> the node's home among the deck's units ({id, title, order, headings}): None when this
+    unit's headings mention it at least as often as any other unit's, else {"section": title, "side": "earlier"|"later"}
+    of the unit that mentions it most (the earliest on a tie). Sections outside the deck never count."""
+    heads = index.get("headings") or {}
+    unit_of = {}
+    for u in units:
+        for h in u["headings"]:
+            if str(h) in heads:
+                unit_of.setdefault(HEAD_MARK + str(heads[str(h)].get("display", "")), u)
+    mine = next((u for u in units if u["id"] == chapter.id), None)
+
+    def find(graph, name: str) -> Optional[dict]:
+        counts = Counter(unit_of[nb]["id"] for nb in graph.neighbors(name) if nb in unit_of)
+        here = counts.pop(chapter.id, 0)
+        if not counts or mine is None:
+            return None
+        by_id = {u["id"]: u for u in units}
+        top = max(counts, key=lambda u: (counts[u], -by_id[u]["order"]))
+        if counts[top] <= here:
+            return None
+        return {"section": by_id[top]["title"], "side": "later" if by_id[top]["order"] > mine["order"] else "earlier"}
+
+    return find
+
+
+class HeadingLayer:
+    """Each heading's own inventory, built once per KB and kept beside it (`FILE`): the nodes the KG links to the
+    heading, and for each node checked against it the heading's prose sentences that name it. A selection merges the
+    layers of its headings (`build_inventory`): a node linked to, or named under, several headings is one node whose
+    sentences are the union, and its home is decided after the merge. A heading whose prose differs from what its entry
+    was built from (another reading of a fenced block) is built again."""
+    FILE = "heading_inventory.json"
+
+    def __init__(self, kb_dir, graph):
+        """`kb_dir` None: kept in memory only."""
+        self.path = Path(kb_dir) / self.FILE if kb_dir is not None else None
+        graphml = Path(kb_dir) / "graph_chunk_entity_relation.graphml" if kb_dir is not None else None
+        self.stamp = f"{graphml.stat().st_mtime_ns}:{graphml.stat().st_size}" if graphml and graphml.exists() else ""
+        self.graph, self.lock, self.dirty = graph, threading.Lock(), False
+        saved = {}
+        if self.path is not None and self.path.exists():
+            try:
+                saved = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                saved = {}
+        self.headings: Dict[str, dict] = saved.get("headings", {}) if saved.get("stamp") == self.stamp else {}
+
+    def _entry(self, hid, node: str, prose: Dict[str, str]) -> dict:
+        sign = hashlib.sha1("\n".join(f"{s}\t{t}" for s, t in prose.items()).encode("utf-8")).hexdigest()
+        entry = self.headings.get(str(hid))
+        if entry is None or entry.get("prose") != sign:
+            linked = ([nb for nb in self.graph.neighbors(node) if infer_node_kind(self.graph.nodes[nb]) == "semantic"]
+                      if self.graph.has_node(node) else [])
+            entry = self.headings[str(hid)] = {"prose": sign, "linked": linked, "named": {}}
+            self.dirty = True
+        return entry
+
+    def linked(self, hid, node: str, prose: Dict[str, str]) -> List[str]:
+        with self.lock:
+            return list(self._entry(hid, node, prose)["linked"])
+
+    def named(self, hid, node: str, prose: Dict[str, str], names: List[str]) -> Dict[str, List[str]]:
+        """{name: the heading's sentences naming it} for `names`, matched once per heading and name."""
+        with self.lock:
+            entry = self._entry(hid, node, prose)
+            todo = [n for n in names if n not in entry["named"]]
+        found = {n: [sid for sid, text in prose.items() if any(p.search(text) for p in name_patterns(n))] for n in todo}
+        with self.lock:
+            entry["named"].update(found)
+            self.dirty = self.dirty or bool(found)
+            return {n: list(entry["named"][n]) for n in names}
+
+    def save(self) -> None:
+        with self.lock:
+            if not self.dirty or self.path is None:
+                return
+            self.path.write_text(json.dumps({"stamp": self.stamp, "headings": self.headings}, ensure_ascii=False),
+                                 encoding="utf-8")
+            self.dirty = False
+
+
 def _chunks(data: dict) -> List[str]:
     return [c for c in str(data.get("source_id") or "").split(_SEP) if c]
 
@@ -95,7 +187,7 @@ class _Anchor:
     def prepare(self, texts: List[str]) -> None:
         todo = [t for t in dict.fromkeys(texts) if t and t not in self.vec]
         if todo:
-            self.vec.update(zip(todo, embed_transient(self.store.embedder, todo)))
+            self.vec.update(zip(todo, self.store.embedder.embed(todo)))     # KG texts: kept with the KB's vectors
 
     def rank(self, text: str, sids: List[str]) -> List[tuple]:
         """[(sid, cosine)] of `sids` closest to `text` first."""
@@ -115,35 +207,36 @@ class _Anchor:
         return [s for s, c in self.rank(text, sids)[:2] if c >= floor]
 
 
-def build_inventory(chapter, store, graph, index: Optional[dict] = None) -> dict:
+def build_inventory(chapter, store, graph, index: Optional[dict] = None, homes: Optional[List[dict]] = None,
+                    layer: Optional[HeadingLayer] = None) -> dict:
     """{nodes: {kid: node}, relations: {rid: relation}, noise: [names], api: [names]} for one chapter.
 
-    node = {name, type, description, sentences, via ("name"|"description"), pids, assets, mentions, span, home}
-    (mentions/span/home are signals for the agents, who judge what is key and what is only named in passing);
+    node = {name, type, description, sentences, via ("name"|"description"), pids, assets, mentions, span, home, local}
+    (mentions/span/home are signals for the agents, who judge what is key and what is only named in passing; `homes`,
+    the deck's units, makes `home` the unit that mentions the node most, else the section at the chapter's level);
     relation = {a, b, kid_a, kid_b, description, sentences, via ("sentence"|"paragraph"|"description"), keywords, weight,
     chunks, local}. Nodes and relations no sentence supports are listed under `ungrounded` for the report, never taught;
     concepts named only on the far side of a chunk's boundary under `elsewhere`. A node's `description` serves to find
     sentences of the chapter, never as text for an agent: the KB merges it across every document and section. A `local`
-    relation was extracted from one chunk holding this chapter's text, so its description is that chunk's own words and
-    may reach an agent."""
+    node or relation was extracted from one chunk holding this chapter's text, so its description is that chunk's own
+    words and may reach an agent."""
     index = index if index is not None else store.index
-    heads = [h for h in _heading_nodes(chapter, index) if graph.has_node(h)]
-    names = list(dict.fromkeys(nb for h in heads for nb in graph.neighbors(h)
-                               if infer_node_kind(graph.nodes[nb]) == "semantic"))
+    layer = layer if layer is not None else HeadingLayer(getattr(store, "kb_dir", None), graph)
+    heads = index.get("headings") or {}
     prose = {sid: s["text"] for sid, s in chapter.sentences.items() if s["kind"] == "text"}
+    own_prose = {h: {sid: t for sid, t in prose.items() if chapter.sentences[sid]["heading"] == h}
+                 for h in chapter.heading_ids}
+    node_of = {h: HEAD_MARK + str(heads[str(h)].get("display", "")) for h in chapter.heading_ids if str(h) in heads}
+    names = list(dict.fromkeys(nb for h in node_of for nb in layer.linked(h, node_of[h], own_prose[h])))
     code = [s["text"] for s in chapter.sentences.values() if s["kind"] == "code"]
     anchor = _Anchor(chapter, store)
-    home = _home_index(chapter, index)
-    named: Dict[str, List[str]] = {}
-    noise, api, pending = [], [], []
-    for name in names:
-        if is_noise(name):
-            noise.append(name)
-            continue
-        patterns = name_patterns(name)
-        named[name] = [sid for sid, text in prose.items() if any(p.search(text) for p in patterns)]
-        if not named[name]:
-            pending.append(name)
+    home = _unit_home(chapter, index, homes) if homes is not None else _home_index(chapter, index)
+    noise = [n for n in names if is_noise(n)]
+    checked = [n for n in names if n not in set(noise)]
+    found = [layer.named(h, node_of.get(h, ""), own_prose[h], checked) for h in chapter.heading_ids]
+    order = {sid: n for n, sid in enumerate(prose)}
+    named: Dict[str, List[str]] = {n: sorted({sid for f in found for sid in f[n]}, key=order.get) for n in checked}
+    api, pending = [], [n for n in checked if not named[n]]
     own = " ".join(s["text"] for s in chapter.sentences.values()) + " " + " ".join(chapter.heading_titles.values())
     elsewhere = [n for n in pending if _named_elsewhere(n, graph.nodes[n], own, store)]
     pending = [n for n in pending if n not in elsewhere]
@@ -164,10 +257,12 @@ def build_inventory(chapter, store, graph, index: Optional[dict] = None) -> dict
             continue
         assets = [nb for nb in graph.neighbors(name) if infer_node_kind(graph.nodes[nb]) == "asset"]
         pids = sorted({chapter.pid_of[s] for s in sentences if s in chapter.pid_of}, key=lambda p: int(p[1:]))
+        chunks = _chunks(data)
         nodes[name] = {"name": name, "type": clean_type(data.get("entity_type")), "via": via,
                        "description": " ".join(str(data.get("description") or "").split())[:240],
                        "sentences": sentences, "assets": assets, "pids": pids,
-                       "mentions": len(named[name]), "span": len(pids), "home": home(graph, name)}
+                       "mentions": len(named[name]), "span": len(pids), "home": home(graph, name),
+                       "local": len(chunks) == 1 and bool(anchor.in_chunks(chunks))}
     relations = _relations(chapter, graph, nodes, anchor, ungrounded)
     kid = {name: f"K{n}" for n, name in enumerate(nodes, 1)}
     return {"nodes": {kid[name]: {**node, "kid": kid[name]} for name, node in nodes.items()},

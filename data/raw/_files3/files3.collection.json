@@ -1,0 +1,39 @@
+{
+ "files": true,
+ "documents": [
+  {
+   "title": "Antibacterial activity of formulated Psidium guajava (guava) hand sanitizer gel on Staphylococcus aureus",
+   "source": "126-Article Text-202-1-10-20181213.pdf",
+   "path": "../126-Article Text-202-1-10-20181213.pdf",
+   "pages": [
+    0,
+    5
+   ],
+   "has_outline": false,
+   "aliases": [],
+   "file_title": "126 Article Text 202 1 10 20181213"
+  },
+  {
+   "title": "A Real Life Application of Linear Programming",
+   "source": "14-Math-1.pdf",
+   "path": "../14-Math-1.pdf",
+   "pages": [
+    6,
+    12
+   ],
+   "has_outline": true,
+   "aliases": []
+  },
+  {
+   "title": "20190810 BearTrap Grave01",
+   "source": "20190810_BearTrap_Grave01.pdf",
+   "path": "../20190810_BearTrap_Grave01.pdf",
+   "pages": [
+    13,
+    18
+   ],
+   "has_outline": false,
+   "aliases": []
+  }
+ ]
+}

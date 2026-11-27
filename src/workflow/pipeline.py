@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from src.models.slide import Slide, SlideType, Table
 from src.rag.chapter_map import load_chapters
 from src.rag.evidence_store import EvidenceStore
-from src.rag.kg_inventory import build_inventory, summary
+from src.rag.kg_inventory import HeadingLayer, build_inventory, summary
 from src.rag.multi_retrieval import ChapterRetrieval
 from src.rag.retrieve_content import load_kg_graph, load_structural_index
 from src.utils.config import Config
@@ -33,8 +33,11 @@ from src.workflow.scope import find_kb_dir, ScopeOrchestrator
 class ChapterPipeline:
     def __init__(self, model: str, domain: Optional[str] = None):
         self.model = model
-        self.parts: Dict[int, int] = {}             # chapter planned on its own -> the Part it belongs to
-        self.part_titles: Dict[int, str] = {}
+        self.parts: Dict[int, List[int]] = {}       # unit -> the split headings above it (outermost first)
+        self.part_titles: Dict[int, str] = {}       # a heading too big for one plan, planned section by section
+        self.part_notes: Dict[int, str] = {}        # its own text too short for a slide: its opener's notes
+        self.own_only: set = set()                  # units holding only a split heading's own text
+        self.layer = None                           # the headings' own inventories (kg_inventory.HeadingLayer)
         self.requested = domain                  # the field the user chose; None: detected in open()
         self.domain = domain or "general"
         self.state: Dict[int, dict] = {}
@@ -67,6 +70,7 @@ class ChapterPipeline:
         except Exception as exc:
             print(f"[Outline] KG graph unavailable ({type(exc).__name__}); planning without it")
             self.graph = None
+        self.layer = HeadingLayer(kb_dir, self.graph) if self.graph is not None else None
         self.titles = {int(h): v.get("title", "") for h, v in (self.index.get("headings") or {}).items()}
         title = self._deck_title(context, roots, root_heading, scope)
         self.domain = fields.resolve(self.model, self.requested, title, *self._field_sample())
@@ -75,20 +79,43 @@ class ChapterPipeline:
         return title
 
     def _units(self, kb_dir, roots: List[int], scope):
-        """The chapters the outline plans one by one: each root, except a root bigger than OUTLINE_UNIT_MAX_CHARS with
-        several sections under it (a Part of chapters), which is planned section by section. {section: its Part}."""
-        chapters = load_chapters(kb_dir, self.index, roots, scope.visible)
-        units, parts = [], {}
-        for ch in chapters:
+        """The chapters the outline plans one by one: each root, except one bigger than OUTLINE_UNIT_MAX_CHARS with
+        sections under it, which is planned section by section (again inside a section still too big). A split heading
+        keeps its place in the deck as an opener over its sections; its own text is a unit of its own when it can fill a
+        slide (SECTION_SLIDE_MIN_CHARS), else the opener's notes. Returns the units and {unit: [split headings above it,
+        outermost first]}; `part_titles` names the split headings, `own_only` the units holding a split heading's text."""
+        text = lambda ch, pids: sum(ch.size(p["pid"]) for p in ch.paragraphs
+                                    if p["pid"] in pids and ch.teachable(p) and p["kind"] == "text")
+        units, chains = [], {}
+        self.part_titles, self.part_notes, self.own_only = {}, {}, set()
+
+        def place(ch, above):
             kids = [c for c in scope.under(ch.id) if scope.visible(c)]
-            chars = sum(ch.size(p["pid"]) for p in ch.paragraphs if ch.teachable(p) and p["kind"] == "text")
-            if chars > Config.OUTLINE_UNIT_MAX_CHARS and len(kids) >= 2:
-                units += kids
-                parts.update({k: ch.id for k in kids})
+            if text(ch, {p["pid"] for p in ch.paragraphs}) <= Config.OUTLINE_UNIT_MAX_CHARS or not kids:
+                units.append(ch)
+                chains[ch.id] = above
+                return
+            self.part_titles[ch.id] = ch.title
+            own = {p["pid"] for p in ch.paragraphs if p["heading"] == ch.id}
+            if text(ch, own) >= Config.SECTION_SLIDE_MIN_CHARS:
+                intro = load_chapters(kb_dir, self.index, [ch.id], scope.visible, own_only=[ch.id])[0]
+                units.append(intro)
+                chains[ch.id] = above + [ch.id]
+                self.own_only.add(ch.id)
             else:
-                units.append(ch.id)
-        self.part_titles = {ch.id: ch.title for ch in chapters if ch.id in set(parts.values())}
-        return (load_chapters(kb_dir, self.index, units, scope.visible) if parts else chapters), parts
+                self.part_notes[ch.id] = " ".join(ch.text_of(p["pid"]) for p in ch.paragraphs
+                                                  if p["pid"] in own and ch.teachable(p) and p["kind"] == "text")
+            for kid in load_chapters(kb_dir, self.index, kids, scope.visible):
+                place(kid, above + [ch.id])
+
+        for ch in load_chapters(kb_dir, self.index, roots, scope.visible):
+            place(ch, [])
+        return units, chains
+
+    def _homes(self) -> List[dict]:
+        """Where each unit sits among the deck's units, for the inventory's `home`: its headings, title and order."""
+        return [{"id": c.id, "title": c.title, "order": n, "headings": set(c.heading_ids)}
+                for n, c in enumerate(self.chapters)]
 
     def _field_sample(self):
         """What the field detector reads: the scope's headings, its most mentioned KG concepts, its opening text."""
@@ -115,17 +142,31 @@ class ChapterPipeline:
         with ThreadPoolExecutor(max_workers=max(1, min(len(self.chapters), Config.PLANNER_MAX_CONCURRENCY))) as pool:
             for chapter_id, state in pool.map(lambda c: (c.id, self._plan_chapter(c)), self.chapters):
                 self.state[chapter_id] = state
+        if self.layer is not None:                   # the headings' inventories and the KG texts' vectors, kept
+            self.layer.save()
+            getattr(self.store.embedder, "save", lambda: None)()
 
     def labels(self) -> Dict[str, str]:
         """The deck's fixed words, in the language of the chapter with the most text."""
         chars = lambda c: sum(c.size(p["pid"]) for p in c.paragraphs if c.teachable(p) and p["kind"] == "text")
         return deck_labels.labels(self.model, max(self.chapters, key=chars).language) if self.chapters else {}
 
+    def numbered(self, labels: Dict[str, str]) -> Dict[str, List[int]]:
+        """{kind: numbers} the scope's own text gives a figure or a table under the deck's word for it ("given in
+        Table 1"), so a visual the document prints no caption for is never named with one of them."""
+        text = " ".join(s["text"] for c in self.chapters for s in c.sentences.values())
+        out = {}
+        for kind in ("figure", "table"):
+            word = labels.get(kind) or kind.capitalize()
+            out[kind] = sorted({int(n) for n in re.findall(rf"\b{re.escape(word)}\.?\s*(\d+)\b", text, re.IGNORECASE)})
+        return out
+
     def _plan_chapter(self, chapter) -> dict:
         chapter.language = deck_labels.language(self.model, deck_labels.sample(chapter))
         heads = (self.index or {}).get("headings") or {}
         chapter.parent_of = {h: (heads.get(str(h)) or {}).get("parent") for h in chapter.heading_ids}
-        inventory = (build_inventory(chapter, self.store, self.graph, self.index) if self.graph is not None
+        inventory = (build_inventory(chapter, self.store, self.graph, self.index, homes=self._homes(), layer=self.layer)
+                     if self.graph is not None
                      else {"nodes": {}, "relations": {}, "noise": [], "api": [], "ungrounded": []})
         planned = self.planner.plan(chapter, inventory, self.titles)
         print(f"[Outline] {chapter.title}: {len(planned['goals'])} goal(s), {len(planned['slides'])} slide(s) from "
@@ -166,6 +207,7 @@ class ChapterPipeline:
             used.update(p for kind in ("formula", "table", "code") for a in slide["built"]["assets"][kind]
                         for p in a.get("pids") or [a["pid"]])
             used.update(str(a["id"]) for a in slide["built"]["assets"].get("images") or [])
+        assembler.place_tables(state["slides"])
         assembler.place_left_figures(state["slides"], used)
         ChapterPipeline.known(state["inventory"], state["slides"])
 
@@ -187,13 +229,16 @@ class ChapterPipeline:
     # ── the deck: specs, downstream packets and Writer jobs in deck order ─────
     def _deck(self) -> None:
         specs, packets, jobs = [], [], []
-        part = None
+        opened = set()
         for chapter in self.chapters:
             state = self.state[chapter.id]
-            if self.parts.get(chapter.id) not in (None, part):     # the first chapter of a Part: the Part's opener
-                part = self.parts[chapter.id]
-                self._opener(specs, packets, part, self.part_titles[part], "Part overview")
-            self._opener(specs, packets, chapter.id, chapter.title, "Chapter overview", chapter.id)
+            for part in self.parts.get(chapter.id) or []:          # the first unit under a split heading: its opener
+                if part not in opened:
+                    opened.add(part)
+                    self._opener(specs, packets, part, self.part_titles[part], "Part overview",
+                                 notes=self.part_notes.get(part, ""))
+            if chapter.id not in self.own_only:                    # a split heading's own text sits under its opener
+                self._opener(specs, packets, chapter.id, chapter.title, "Chapter overview", chapter.id)
             goals = {g["gid"]: g for g in state["goals"]}
             before = {id(o["before"]): (hid, o) for hid, o in state.get("openers", {}).items() if hid != chapter.id}
             for n, slide in enumerate(state["slides"]):
@@ -237,9 +282,11 @@ class ChapterPipeline:
         self._number()
 
     @staticmethod
-    def _opener(specs: List[Slide], packets: List[dict], hid: int, title: str, goal: str, root=None) -> None:
-        """A section divider (a Part's, a chapter's, or a part of a chapter whose heading only introduces it) whose agenda
-        `_agenda` fills; `root` is the chapter it belongs to (None for a Part)."""
+    def _opener(specs: List[Slide], packets: List[dict], hid: int, title: str, goal: str, root=None,
+                notes: str = "") -> None:
+        """A section divider (a split heading's, a chapter's, or a part of a chapter whose heading only introduces it)
+        whose agenda `_agenda` fills; `root` is the chapter it belongs to (None for a split heading); `notes` its
+        heading's own text too short for a slide, kept for the presenter."""
         opener = Slide(title, SlideType.CONTENT, goal, kg_node_id=hid, is_section_opener=True, section_heading=title,
                        slide_id=f"heading-{hid}-divider")
         opener.grounding = {"agenda": [], "scope_root_id": hid if root is None else root, "unit_id": None,
@@ -247,7 +294,7 @@ class ChapterPipeline:
         specs.append(opener)
         packets.append({"slide_title": title, "section_opener": True, "agenda_items": [], "slide_id": opener.slide_id,
                         "kg_node_id": hid, "scope_root_id": hid, "layout_hint": "agenda_layout", "visual_plan": opener.grounding["visual_plan"],
-                        "source_pages": [], "section_assets": [], "evidence": "", "goal": goal})
+                        "source_pages": [], "section_assets": [], "evidence": "", "goal": goal, "notes": notes})
 
     @staticmethod
     def _evidence(spec: Slide, packet: dict, built: dict) -> None:
@@ -276,9 +323,18 @@ class ChapterPipeline:
         present = {s.slide_id for s in self.specs}
         keep_specs, keep_packets = [], []
         for spec, packet in zip(self.specs, self.packets):
-            if spec.is_section_opener and spec.kg_node_id in self.part_titles:    # a Part lists its chapters left
-                agenda = [c.title for c in self.chapters if self.parts.get(c.id) == spec.kg_node_id
-                          and any(s.get("slide_id") in present for s in self.state[c.id]["slides"])]
+            if spec.is_section_opener and spec.kg_node_id in self.part_titles:    # its sections that still have slides
+                part = spec.kg_node_id
+                live = lambda c: any(s.get("slide_id") in present for s in self.state[c.id]["slides"])
+                agenda = []
+                for c in self.chapters:
+                    chain = self.parts.get(c.id) or []
+                    if part not in chain or c.id == part or not live(c):    # its own text follows it, unlisted
+                        continue
+                    below = chain[chain.index(part) + 1:]           # the section right under it on the way to c
+                    item = self.part_titles[below[0]] if below else c.title
+                    if item not in agenda:
+                        agenda.append(item)
                 if not agenda:
                     continue
                 spec.grounding["agenda"] = packet["agenda_items"] = agenda

@@ -19,11 +19,12 @@ Give each label in that language.
    based on, as "Source" does in "Source: Annual Report 2020". `presenter`: the word that introduces who gives the talk, as
    "Presenter" does in "Presenter: Jane Doe". `institution`: the word that introduces the presenter's organisation, as
    "Institution" does in "Institution: University of Oslo". These two start a line of small text, so they are written
-   as at the start of a sentence, not in capitals.
+   as at the start of a sentence, not in capitals. `figure`: the word that numbers a figure under it, as "Figure" does in
+   "Figure 3". `table`: the word that numbers a table, as "Table" does in "Table 2".
 2. One or two words each.
 </rules>
 
 <output>
 Return exactly one JSON object and nothing else:
-{"lecture": "...", "section": "...", "contents": "...", "where": "...", "thanks": "...", "summary": "...", "source": "...", "presenter": "...", "institution": "..."}
+{"lecture": "...", "section": "...", "contents": "...", "where": "...", "thanks": "...", "summary": "...", "source": "...", "presenter": "...", "institution": "...", "figure": "...", "table": "..."}
 </output>

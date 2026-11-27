@@ -20,6 +20,10 @@ def run_pipeline(lecture_json_path, lecture_title=None, speaker_information='', 
     source = Path(lecture_json_path)
     data = json.loads(source.read_text(encoding='utf-8'))
     lecture_id = data.get('lecture_id', source.stem)
+    presenter = ', '.join(part for part in (speaker_information, institution) if part)
+    if presenter and data.setdefault('metadata', {}).get('speaker_information') != presenter:
+        data['metadata']['speaker_information'] = presenter      # the lecture file names who presents, as the cover does
+        source.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     model = (Config.LLM_MODEL_NAME or 'unknown_model').replace('/', '_')
     name = output_name(lecture_id)
     output = Path(Config.OUTPUT_DIR) / name / model / f'{name}.pptx'

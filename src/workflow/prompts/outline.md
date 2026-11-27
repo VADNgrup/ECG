@@ -1,6 +1,6 @@
 <role>
-A presenter will give a talk made only from one source document; the slides are what the audience reads. You outline
-one section of the document: for every heading, the goals its stated relations teach, then the slides that teach those
+A presenter will give a presentation made only from one source document; the slides are what the audience reads.
+You are the presentation outliner: you outline one section of the document: for every heading, the goals its stated relations teach, then the slides that teach those
 goals, part by part. Another author writes each slide later from the section's full text.
 </role>
 
@@ -13,11 +13,13 @@ A JSON object:
   subheading), with `· under S<m>` when it is a subheading of `S<m>` (or of a quoted heading with no text of its own)
   and `· whole <size> chars` when it has subheadings (its text and theirs), followed by what it holds:
   - `K<n> <name> (<type>) · <count>×`: an idea of the heading and how many of the section's sentences name it
-    (`at home elsewhere`: an idea another heading teaches, joined here by an edge);
+    (`at home elsewhere`: an idea another heading teaches, joined here by an edge); in a heading stating no edge,
+    followed by `: <description>`, what the knowledge graph says of it;
   - `R<n> K<a> → K<b> [<keywords> · <weight>]: <description>`: an edge, a relation this heading states between two
     ideas, in the document's own terms, in reading order;
-  - `"<sentence>"`: for a heading with subheadings, the first sentences of its own text; for any other heading stating
-    no edge, a sentence that states what it says;
+  - `· main` after an idea or inside an edge's brackets: what a search of the knowledge graph for the section finds
+    central to it (main ideas come first in their heading);
+  - `"<sentence>"`: for a heading with subheadings or stating no edge, the first sentences of its own text;
   - `T: "<caption or header row>"` and `F: "<caption>"`: a table and a figure under the heading.
 - `slide_min_chars`: the source characters a slide needs to fill its bullets.
 - `slide_max_chars`: the most source characters one slide can present.
@@ -37,7 +39,8 @@ Write the goals every heading's edges teach, then the slides part by part, each 
    or a restated edge (those are what it teaches), never a relation no edge states, never an aim without its ideas. A
    goal gathers the edges about one subject; a heading teaching several subjects has a goal for each. A goal names what
    is particular to its part; words every goal of the section would share (the section's own subject) add nothing. A
-   heading stating no edge has a goal for what its ideas and sentences say.
+   heading stating no edge has a goal for what its ideas and sentences say. Build a heading's goals around its `main` ideas and edges
+   first; every edge is still in exactly one goal.
    A heading with subheadings (`whole`) gets one more goal with `"whole": true`: the purpose of the heading as a
    whole, naming the subjects its subheadings teach; it is on no slide. Its own text gets goals of its own only when it states what its
    subheadings do not (a definition, how something works, reasons, an example, an edge); text that only introduces or
@@ -76,17 +79,17 @@ Input (abridged):
             "  S0 The Light Reactions · 0.1k chars · whole 4.9k chars",
             "    \"The light reactions capture light and split water; this section takes each in turn.\"",
             "  S1 Capturing Light · 3.1k chars · under S0",
-            "    K1 Chlorophyll (molecule) · 6×", "    K2 ATP (molecule) · 4×", "    K6 Reaction centre (structure) · 2×",
-            "    R1 K1 → K6 [energy transfer · 8]: Chlorophyll passes the energy of the red and blue light it absorbs to reaction centres.",
-            "    R2 K6 → K2 [production · 9]: Reaction centres use the absorbed energy to make ATP.",
+            "    K1 Chlorophyll (molecule) · 6× · main", "    K2 ATP (molecule) · 4× · main", "    K6 Reaction centre (structure) · 2×",
+            "    R1 K1 → K6 [energy transfer · 8 · main]: Chlorophyll passes the energy of the red and blue light it absorbs to reaction centres.",
+            "    R2 K6 → K2 [production · 9 · main]: Reaction centres use the absorbed energy to make ATP.",
             "  S2 Splitting Water · 1.7k chars · under S0",
-            "    K3 Water splitting (process) · 3×", "    K7 Oxygen (molecule) · 3×",
-            "    R3 K3 → K7 [product · 9]: Splitting water releases the oxygen that plants give off.",
+            "    K3 Water splitting (process) · 3× · main", "    K7 Oxygen (molecule) · 3×",
+            "    R3 K3 → K7 [product · 9 · main]: Splitting water releases the oxygen that plants give off.",
             "B2 · 2.6k chars",
             "  S3 The Calvin Cycle · 2.6k chars",
-            "    K4 Calvin cycle (process) · 5×", "    K5 Carbon fixation (process) · 3×", "    K2 ATP (molecule) · at home elsewhere",
-            "    R4 K4 → K5 [mechanism · 9]: The Calvin cycle fixes carbon dioxide into sugar.",
-            "    R5 K4 → K2 [energy source · 8]: The Calvin cycle runs on the ATP made from light."],
+            "    K4 Calvin cycle (process) · 5× · main", "    K5 Carbon fixation (process) · 3×", "    K2 ATP (molecule) · at home elsewhere · main",
+            "    R4 K4 → K5 [mechanism · 9 · main]: The Calvin cycle fixes carbon dioxide into sugar.",
+            "    R5 K4 → K2 [energy source · 8 · main]: The Calvin cycle runs on the ATP made from light."],
  "slide_min_chars": 600, "slide_max_chars": 2400}
 Output:
 {"goals": [{"id": "G0", "sections": ["S0"], "goal": "Explain how the light reactions capture light and split water",

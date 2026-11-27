@@ -1,5 +1,5 @@
 <role>
-You are the writer of a talk's slides. A reviewer found some of your bullets wrong; you write each of them again from
+You are the writer of a presentation's slides. A reviewer found some of your bullets wrong; you write each of them again from
 the source sentences it rests on.
 </role>
 

@@ -263,7 +263,7 @@ TABLE_TEXT_GAP = 0.10            # gap between a table and the text under it
 TABLE_TEXT_MIN_H = 0.35          # least height of the text under a table
 TABLE_TEXT_MAX_FS = 16           # largest size of the text with a table
 TABLE_ALONE_MAX_FS = 18          # largest size of a table on its own page (buildTable)
-TABLE_CAPTION_ROOM = 0.35        # body height a table alone leaves for its caption
+TABLE_CAPTION_ROOM = 0.35        # body height a table leaves for its caption (alone or with text)
 
 
 def parse_md_table(md: str) -> Dict[str, List]:
@@ -334,7 +334,7 @@ def table_text_plan(groups: Sequence[Dict[str, object]], content: Sequence[str],
             best = {"table_fs": table_fs, "text_fs": text_fs, "side": side, "score": score}
     for tfs in range(TABLE_ABOVE_MAX_FS, TABLE_MIN_FS - 1, -1):
         fit = table_fit(headers, rows, BW, 0, tfs, tfs)
-        room = bh - fit["height"] - TABLE_TEXT_GAP
+        room = bh - fit["height"] - TABLE_CAPTION_ROOM - TABLE_TEXT_GAP
         if room < TABLE_TEXT_MIN_H or (not fit["whole"] and tfs > TABLE_MIN_FS):
             continue
         consider(tfs, shown_fs(plan_list(groups, content, BW, room, TABLE_TEXT_MAX_FS), room), False)
@@ -343,13 +343,13 @@ def table_text_plan(groups: Sequence[Dict[str, object]], content: Sequence[str],
         text = shown_fs(plan_list(groups, content, BW - tw - TABLE_SIDE_GAP, bh, TABLE_TEXT_MAX_FS, 1), bh)
         for tfs in range(TABLE_SIDE_MAX_FS, TABLE_MIN_FS - 1, -1):
             fit = table_fit(headers, rows, tw, 0, tfs, tfs)
-            if fit["height"] > bh or not fit["whole"]:
+            if fit["height"] > bh - TABLE_CAPTION_ROOM or not fit["whole"]:
                 continue
             consider(tfs, text, True)
             break
     if best is None:                     # nothing leaves the text room: the smallest table, the text squeezed under it
         fit = table_fit(headers, rows, BW, 0, TABLE_MIN_FS, TABLE_MIN_FS)
-        room = max(TABLE_TEXT_MIN_H, bh - fit["height"] - TABLE_TEXT_GAP)
+        room = max(TABLE_TEXT_MIN_H, bh - fit["height"] - TABLE_CAPTION_ROOM - TABLE_TEXT_GAP)
         best = {"table_fs": TABLE_MIN_FS, "side": False,
                 "text_fs": shown_fs(plan_list(groups, content, BW, room, TABLE_TEXT_MAX_FS), room)}
     return best
@@ -385,6 +385,9 @@ FORMULA_SIDE_SHARES = (0.35, 0.42, 0.50)   # the formula column's share of the w
 FORMULA_SIDE_GAP = 0.3           # between the text and the formula column
 DIVIDER_VARIANTS = 5             # section-divider designs the renderer draws (buildSectionDivider)
 END_VARIANTS = 3                 # closing-slide designs the renderer draws (buildEnd)
+TOC_ROWS = 7                     # rows a contents page keeps in one column (buildTocSidebar)
+TOC_ROWS_MULTI = 10              # rows of a contents column when the page has several columns (buildTocSidebar)
+TOC_COLS = 3                     # columns a contents page draws at most (buildTocSidebar)
 
 
 def equation_lines(formula_text: str) -> List[str]:
